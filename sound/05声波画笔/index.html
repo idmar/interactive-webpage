@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>声波画笔</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{overflow:hidden;background:#f8f8f8;font-family:-apple-system,'Helvetica Neue','PingFang SC',sans-serif;user-select:none}
+canvas{display:block;position:fixed;top:0;left:0;width:100%;height:100%}
+
+/* 启动遮罩 */
+#overlay{position:fixed;inset:0;z-index:100;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(248,248,248,.92);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);transition:opacity .6s}
+#overlay.hidden{opacity:0;pointer-events:none}
+#overlay h1{font-size:clamp(2rem,5vw,3.6rem);font-weight:200;letter-spacing:.15em;color:#222;margin-bottom:.3em}
+#overlay p{font-size:1rem;color:#888;letter-spacing:.08em;margin-bottom:2.4em}
+#startBtn{padding:14px 52px;font-size:1.05rem;font-weight:400;letter-spacing:.12em;color:#fff;background:#222;border:none;border-radius:60px;cursor:pointer;transition:transform .2s,box-shadow .2s}
+#startBtn:hover{transform:scale(1.04);box-shadow:0 8px 30px rgba(0,0,0,.15)}
+
+/* 底部工具栏 */
+#toolbar{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:50;display:flex;gap:10px;padding:10px 18px;border-radius:20px;background:rgba(255,255,255,.55);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border:1px solid rgba(255,255,255,.45);box-shadow:0 4px 24px rgba(0,0,0,.06);opacity:0;pointer-events:none;transition:opacity .5s}
+#toolbar.show{opacity:1;pointer-events:auto}
+#toolbar button{padding:8px 18px;font-size:.85rem;font-weight:400;letter-spacing:.06em;color:#444;background:rgba(255,255,255,.6);border:1px solid rgba(0,0,0,.06);border-radius:12px;cursor:pointer;transition:background .2s,color .2s,transform .15s;white-space:nowrap}
+#toolbar button:hover{background:rgba(0,0,0,.07);color:#111;transform:translateY(-1px)}
+#toolbar button.active{background:#222;color:#fff;border-color:#222}
+
+/* 音量指示 */
+#volBar{position:fixed;top:20px;right:20px;z-index:50;width:4px;height:80px;border-radius:2px;background:rgba(0,0,0,.06);overflow:hidden;opacity:0;transition:opacity .5s}
+#volBar.show{opacity:1}
+#volFill{position:absolute;bottom:0;width:100%;border-radius:2px;background:linear-gradient(to top,#888,#222);transition:height .05s}
+
+/* 模式标签 */
+#modeLabel{position:fixed;top:20px;left:20px;z-index:50;font-size:.78rem;letter-spacing:.1em;color:#aaa;opacity:0;transition:opacity .5s}
+#modeLabel.show{opacity:1}
+</style>
+</head>
+<body>
+
+<canvas id="c"></canvas>
+
+<div id="overlay">
+  <h1>声波画笔</h1>
+  <p>对着麦克风说话或唱歌，用声音绘画</p>
+  <button id="startBtn">开始</button>
+</div>
+
+<div id="toolbar">
+  <button id="btnClear">清空</button>
+  <button id="btnMode" class="active" data-mode="free">自由</button>
+  <button id="btnKaleido" data-mode="kaleido">万花筒</button>
+  <button id="btnSpiral" data-mode="spiral">螺旋</button>
+  <button id="btnSave">保存 PNG</button>
+</div>
+
+<div id="volBar"><div id="volFill"></div></div>
+<div id="modeLabel">自由模式</div>
+
+<script>
+(() => {
+'use strict';
+
+/* ── DOM ── */
+const canvas    = document.getElementById('c');
+const ctx       = canvas.getContext('2d');
+const overlay   = document.getElementById('overlay');
+const startBtn  = document.getElementById('startBtn');
+const toolbar   = document.getElementById('toolbar');
+const btnClear  = document.getElementById('btnClear');
+const btnMode   = document.getElementById('btnMode');
+const btnKaleido= document.getElementById('btnKaleido');
+const btnSpiral = document.getElementById('btnSpiral');
+const btnSave   = document.getElementById('btnSave');
+const volBar    = document.getElementById('volBar');
+const volFill   = document.getElementById('volFill');
+const modeLabel = document.getElementById('modeLabel');
+
+/* ── State ── */
+let W, H;
+let audioCtx, analyser, freqData, timeData;
+let running = false;
+let mode = 'free';           // free | kaleido | spiral
+let t  = 0;
+let hue = 0;
+let prevX = null, prevY = null;
+// 万花筒上一帧的镜像点
+let prevKaleidoPts = null;
+// 平滑后的 rms / freq
+let smoothRms  = 0;
+let smoothFreq = 200;
+
+/* ── Resize ── */
+function resize() {
+  const dpr = window.devicePixelRatio || 1;
+  W = window.innerWidth;
+  H = window.innerHeight;
+  canvas.width  = W * dpr;
+  canvas.height = H * dpr;
+  canvas.style.width  = W + 'px';
+  canvas.style.height = H + 'px';
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.fillStyle = '#f8f8f8';
+  ctx.fillRect(0, 0, W, H);
+}
+window.addEventListener('resize', resize);
+resize();
+
+/* ── Audio Init ── */
+async function initAudio() {
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+  });
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  const src = audioCtx.createMediaStreamSource(stream);
+  analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 2048;
+  analyser.smoothingTimeConstant = 0.8;
+  src.connect(analyser);
+  freqData = new Uint8Array(analyser.frequencyBinCount);
+  timeData = new Uint8Array(analyser.fftSize);
+}
+
+/* ── Audio Analysis ── */
+function getRMS() {
+  analyser.getByteTimeDomainData(timeData);
+  let sum = 0;
+  for (let i = 0; i < timeData.length; i++) {
+    const v = (timeData[i] - 128) / 128;
+    sum += v * v;
+  }
+  return Math.sqrt(sum / timeData.length);
+}
+
+function getDominantFreq() {
+  analyser.getByteFrequencyData(freqData);
+  let maxVal = 0, maxIdx = 0;
+  // 只关注 60Hz ~ 4000Hz 范围
+  const minBin = Math.floor(60 * analyser.fftSize / audioCtx.sampleRate);
+  const maxBin = Math.min(Math.floor(4000 * analyser.fftSize / audioCtx.sampleRate), freqData.length);
+  for (let i = minBin; i < maxBin; i++) {
+    if (freqData[i] > maxVal) { maxVal = freqData[i]; maxIdx = i; }
+  }
+  return maxIdx * audioCtx.sampleRate / analyser.fftSize;
+}
+
+/* ── Drawing Helpers ── */
+function drawSeg(x1, y1, x2, y2, lw, color, alpha) {
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(x1, y1);
+  ctx.lineTo(x2, y2);
+  ctx.strokeStyle  = color;
+  ctx.lineWidth    = lw;
+  ctx.lineCap      = 'round';
+  ctx.lineJoin     = 'round';
+  ctx.globalAlpha  = alpha;
+  ctx.shadowColor  = color;
+  ctx.shadowBlur   = Math.min(lw * 2, 30);
+  ctx.stroke();
+  ctx.restore();
+}
+
+/* ── Position: Lissajous + 声音偏移 ── */
+function basePos(t, rms, freq) {
+  // Lissajous 参数随声音变化
+  const a = 3 + Math.round(freq / 500) % 5;   // 3~7
+  const b = 2 + Math.round(freq / 700) % 4;   // 2~5
+  const delta = t * 0.15;
+  const ampX = W * (0.28 + rms * 0.15);
+  const ampY = H * (0.25 + rms * 0.12);
+  const noiseX = rms * 120 * Math.sin(t * 7.3 + freq * 0.01);
+  const noiseY = rms * 100 * Math.cos(t * 5.7 + freq * 0.013);
+  return {
+    x: W * 0.5 + ampX * Math.sin(a * t * 0.35 + delta) + noiseX,
+    y: H * 0.5 + ampY * Math.cos(b * t * 0.28 + delta * 0.7) + noiseY
+  };
+}
+
+/* ── Position: 螺旋模式 ── */
+function spiralPos(t, rms, freq) {
+  const base = basePos(t, rms, freq);
+  const cx = W / 2, cy = H / 2;
+  const dx = base.x - cx, dy = base.y - cy;
+  const dist = Math.sqrt(dx * dx + dy * dy);
+  const angle = Math.atan2(dy, dx);
+  // 螺旋扭曲
+  const spiralAngle = angle + rms * 2.5 + t * 0.5;
+  const spiralDist  = dist * (0.6 + 0.4 * Math.sin(t * 0.8 + freq * 0.005));
+  return {
+    x: cx + spiralDist * Math.cos(spiralAngle),
+    y: cy + spiralDist * Math.sin(spiralAngle)
+  };
+}
+
+/* ── 万花筒镜像点 ── */
+const KALEIDO_N = 8;
+function mirrorPoints(x, y) {
+  const cx = W / 2, cy = H / 2;
+  const dx = x - cx, dy = y - cy;
+  const pts = [];
+  for (let i = 0; i < KALEIDO_N; i++) {
+    const a = (Math.PI * 2 / KALEIDO_N) * i;
+    const cos = Math.cos(a), sin = Math.sin(a);
+    // 旋转
+    pts.push({ x: cx + dx * cos - dy * sin, y: cy + dx * sin + dy * cos });
+    // 镜像
+    pts.push({ x: cx + dx * cos + dy * sin, y: cy + dx * sin - dy * cos });
+  }
+  return pts;
+}
+
+/* ── Main Loop ── */
+let frameCount = 0;
+function frame() {
+  if (!running) return;
+  requestAnimationFrame(frame);
+  frameCount++;
+
+  const rawRms  = getRMS();
+  const rawFreq = getDominantFreq();
+
+  // 平滑
+  smoothRms  = smoothRms  * 0.7 + rawRms  * 0.3;
+  smoothFreq = smoothFreq * 0.85 + rawFreq * 0.15;
+
+  const normRms  = Math.min(smoothRms * 5, 1);
+  const normFreq = Math.min(smoothFreq / 3000, 1);
+
+  // 极慢拖尾：半透明覆盖
+  if (frameCount % 2 === 0) {
+    ctx.fillStyle = 'rgba(248,248,248,0.018)';
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  // 画笔参数
+  const lineW = 1.5 + normRms * 20;
+  hue = (normFreq * 260 + t * 10) % 360;     // 低频暖 → 高频冷
+  const sat = 45 + normRms * 55;
+  const lum = 42 + normRms * 18;
+  const color = `hsl(${hue},${sat}%,${lum}%)`;
+  const alpha = 0.12 + normRms * 0.7;
+
+  t += 0.014 + normRms * 0.05;
+
+  // 音量条
+  volFill.style.height = (normRms * 100) + '%';
+
+  if (normRms < 0.015) {
+    prevX = prevY = null;
+    prevKaleidoPts = null;
+    return;
+  }
+
+  /* ── 自由模式 ── */
+  if (mode === 'free') {
+    const pos = basePos(t, smoothRms, smoothFreq);
+    if (prevX !== null) {
+      drawSeg(prevX, prevY, pos.x, pos.y, lineW, color, alpha);
+    }
+    prevX = pos.x; prevY = pos.y;
+  }
+
+  /* ── 螺旋模式 ── */
+  else if (mode === 'spiral') {
+    const pos = spiralPos(t, smoothRms, smoothFreq);
+    if (prevX !== null) {
+      drawSeg(prevX, prevY, pos.x, pos.y, lineW * 0.85, color, alpha);
+    }
+    prevX = pos.x; prevY = pos.y;
+  }
+
+  /* ── 万花筒模式 ── */
+  else if (mode === 'kaleido') {
+    const pos = basePos(t, smoothRms, smoothFreq);
+    const pts = mirrorPoints(pos.x, pos.y);
+
+    if (prevKaleidoPts && prevKaleidoPts.length === pts.length) {
+      for (let i = 0; i < pts.length; i++) {
+        // 相邻两点间也画线，形成花瓣
+        const ni = (i + 1) % pts.length;
+        drawSeg(
+          prevKaleidoPts[i].x, prevKaleidoPts[i].y,
+          pts[i].x, pts[i].y,
+          lineW * 0.55, color, alpha * 0.7
+        );
+      }
+    }
+    prevKaleidoPts = pts.map(p => ({ x: p.x, y: p.y }));
+  }
+}
+
+/* ── Mode Switching ── */
+const modeButtons = { free: btnMode, kaleido: btnKaleido, spiral: btnSpiral };
+const modeNames   = { free: '自由模式', kaleido: '万花筒模式', spiral: '螺旋模式' };
+function setMode(m) {
+  mode = m;
+  prevX = prevY = null;
+  prevKaleidoPts = null;
+  Object.values(modeButtons).forEach(b => b.classList.remove('active'));
+  modeButtons[m].classList.add('active');
+  modeLabel.textContent = modeNames[m];
+}
+btnMode.addEventListener('click',    () => setMode('free'));
+btnKaleido.addEventListener('click', () => setMode('kaleido'));
+btnSpiral.addEventListener('click',  () => setMode('spiral'));
+
+/* ── Clear ── */
+btnClear.addEventListener('click', () => {
+  ctx.fillStyle = '#f8f8f8';
+  ctx.fillRect(0, 0, W, H);
+  prevX = prevY = null;
+  prevKaleidoPts = null;
+});
+
+/* ── Save ── */
+btnSave.addEventListener('click', () => {
+  const link = document.createElement('a');
+  link.download = '声波画笔_' + Date.now() + '.png';
+  link.href = canvas.toDataURL('image/png');
+  link.click();
+});
+
+/* ── Start ── */
+startBtn.addEventListener('click', async () => {
+  try {
+    await initAudio();
+  } catch (e) {
+    alert('无法访问麦克风：' + e.message);
+    return;
+  }
+  overlay.classList.add('hidden');
+  toolbar.classList.add('show');
+  volBar.classList.add('show');
+  modeLabel.classList.add('show');
+  running = true;
+  requestAnimationFrame(frame);
+});
+
+})();
+</script>
+</body>
+</html>

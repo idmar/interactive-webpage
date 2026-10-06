@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
+<title>粒子肖像</title>
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#0a0a0f;--fg:#e8e8e8;--accent:#4af;--radius:12px}
+html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);color:var(--fg);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+#app{position:relative;width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center}
+canvas{display:block;max-width:100%;max-height:100%;border-radius:var(--radius)}
+.overlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none;z-index:10}
+.header{text-align:center;padding:1rem 1.5rem;pointer-events:none}
+.header h1{font-size:clamp(1.6rem,4vw,2.8rem);font-weight:700;letter-spacing:.06em;background:linear-gradient(135deg,#4af,#f4a,#4fa);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;text-fill-color:transparent;margin-bottom:.3rem}
+.header p.sub{font-size:clamp(.8rem,2vw,1.1rem);opacity:.7;letter-spacing:.04em}
+.hint{position:absolute;bottom:clamp(3.5rem,10vh,6rem);left:50%;transform:translateX(-50%);font-size:clamp(.7rem,1.6vw,.9rem);opacity:.55;text-align:center;max-width:90%;line-height:1.6;pointer-events:none}
+.controls{position:absolute;bottom:1.2rem;left:50%;transform:translateX(-50%);display:flex;gap:.5rem;z-index:20;pointer-events:auto}
+.btn{padding:.45rem 1rem;border:1px solid rgba(255,255,255,.18);border-radius:20px;background:rgba(255,255,255,.06);color:var(--fg);font-size:.78rem;cursor:pointer;transition:all .25s;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);user-select:none}
+.btn:hover,.btn.active{background:rgba(255,255,255,.15);border-color:rgba(255,255,255,.35)}
+.btn.active{box-shadow:0 0 10px rgba(100,180,255,.3)}
+#loading{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:var(--bg);z-index:100;transition:opacity .6s}
+#loading.done{opacity:0;pointer-events:none}
+#loading .spinner{width:40px;height:40px;border:3px solid rgba(255,255,255,.1);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
+#loading p{margin-top:1rem;font-size:.9rem;opacity:.7}
+#loading .progress{width:180px;height:4px;background:rgba(255,255,255,.08);border-radius:2px;margin-top:.6rem;overflow:hidden}
+#loading .bar{height:100%;width:0%;background:var(--accent);border-radius:2px;transition:width .15s}
+#error{position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;background:var(--bg);z-index:90;text-align:center;padding:2rem}
+#error.show{display:flex}
+#error p{margin-bottom:1rem;font-size:.95rem;opacity:.8;line-height:1.6}
+#error button{padding:.5rem 1.5rem;border-radius:20px;border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.08);color:var(--fg);cursor:pointer;font-size:.85rem}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media(max-width:600px){.controls{bottom:.8rem;gap:.35rem}.btn{padding:.35rem .7rem;font-size:.7rem}.hint{bottom:3rem;padding:0 1rem}}
+@media print{body{background:#fff;color:#000}.overlay,.controls,#loading,#error{display:none!important}canvas{max-width:100%;border-radius:0}}
+@media(prefers-reduced-motion:reduce){*{animation-duration:0s!important;transition-duration:0s!important}}
+</style>
+</head>
+<body>
+<div id="app">
+<canvas id="canvas"></canvas>
+<div class="overlay">
+<div class="header"><h1>粒子肖像</h1><p class="sub">你的身体是数字分身</p></div>
+</div>
+<p class="hint">你正在变成数字肖像。移动身体，观察粒子如何跟随你。<br>站在纯色背景前效果更佳。</p>
+<div class="controls">
+<button class="btn active" data-style="blue">科技蓝</button>
+<button class="btn" data-style="pink">霓虹粉</button>
+<button class="btn" data-style="sketch">黑白素描</button>
+</div>
+<div id="loading">
+<div class="spinner"></div>
+<p>正在校准背景…请保持不动</p>
+<div class="progress"><div class="bar" id="progressBar"></div></div>
+</div>
+<div id="error">
+<p>无法访问摄像头。<br>请确认已授予摄像头权限后重试。</p>
+<button id="retryBtn">重试</button>
+</div>
+</div>
+<script>
+(function(){
+"use strict";
+try{
+
+const MAX_PARTICLES=1500,MIN_PARTICLES=200,BG_FRAMES=30,PROC_W=320,PROC_H=240,FPS=30,FRAME_MS=1000/FPS;
+const reducedMotion=window.matchMedia("(prefers-reduced-motion:reduce)").matches;
+
+const canvas=document.getElementById("canvas"),ctx=canvas.getContext("2d");
+const loadingEl=document.getElementById("loading"),errorEl=document.getElementById("error"),retryBtn=document.getElementById("retryBtn");
+const progressBar=document.getElementById("progressBar");
+
+let W,H,video,offC,offCtx,bgData,maskData,stream;
+let particles=[],styleMode="blue";
+let lastTime=0,ready=false;
+
+/* ---- resize ---- */
+function resize(){
+  const r=window.devicePixelRatio||1;
+  const maxW=window.innerWidth,maxH=window.innerHeight;
+  const aspect=4/3;
+  let cw,ch;
+  if(maxW/maxH>aspect){ch=maxH;cw=ch*aspect}else{cw=maxW;ch=cw/aspect}
+  canvas.style.width=cw+"px";canvas.style.height=ch+"px";
+  canvas.width=W=Math.round(cw*r);canvas.height=H=Math.round(ch*r);
+}
+window.addEventListener("resize",resize);resize();
+
+/* ---- video ---- */
+function initVideo(){
+  return navigator.mediaDevices.getUserMedia({video:{facingMode:"user",width:{ideal:640},height:{ideal:480}},audio:false}).then(s=>{
+    stream=s;
+    video=document.createElement("video");
+    video.srcObject=s;video.setAttribute("playsinline","");video.muted=true;
+    return new Promise((res,rej)=>{video.onloadedmetadata=()=>{video.play().then(()=>res()).catch(rej)};video.onerror=()=>rej(new Error("video"))});
+  });
+}
+
+/* ---- background subtraction ---- */
+let bgBuf,frameCount=0;
+function initBg(){
+  bgBuf=new Float32Array(PROC_W*PROC_H*3);
+  offC=document.createElement("canvas");offC.width=PROC_W;offC.height=PROC_H;
+  offCtx=offC.getContext("2d",{willReadFrequently:true});
+  frameCount=0;
+  return new Promise(res=>{
+    function cap(){
+      if(frameCount>=BG_FRAMES){
+        for(let i=0;i<bgBuf.length;i++)bgBuf[i]/=BG_FRAMES;
+        res();return;
+      }
+      offCtx.drawImage(video,0,0,PROC_W,PROC_H);
+      const d=offCtx.getImageData(0,0,PROC_W,PROC_H).data;
+      for(let i=0;i<d.length;i+=4){
+        const j=(i/4)*3;
+        bgBuf[j]+=d[i];bgBuf[j+1]+=d[i+1];bgBuf[j+2]+=d[i+2];
+      }
+      frameCount++;
+      progressBar.style.width=(frameCount/BG_FRAMES*100)+"%";
+      requestAnimationFrame(cap);
+    }
+    cap();
+  });
+}
+
+/* ---- foreground mask ---- */
+const maskW=PROC_W,maskH=PROC_H;
+maskData=new Uint8Array(maskW*maskH);
+const THRESH=35;
+
+function computeMask(){
+  offCtx.drawImage(video,0,0,PROC_W,PROC_H);
+  const d=offCtx.getImageData(0,0,PROC_W,PROC_H).data;
+  for(let y=0;y<maskH;y++){
+    for(let x=0;x<maskW;x++){
+      const i=(y*maskW+x)*4,j=(y*maskW+x)*3;
+      const dr=d[i]-bgBuf[j],dg=d[i+1]-bgBuf[j+1],db=d[i+2]-bgBuf[j+2];
+      const diff=Math.sqrt(dr*dr+dg*dg+db*db);
+      maskData[y*maskW+x]=diff>THRESH?1:0;
+    }
+  }
+  /* 3x3 median-ish denoise: erode then dilate */
+  const tmp=new Uint8Array(maskW*maskH);
+  for(let y=1;y<maskH-1;y++)for(let x=1;x<maskW-1;x++){
+    let s=0;for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++)s+=maskData[(y+dy)*maskW+(x+dx)];
+    tmp[y*maskW+x]=s>=6?1:0;
+  }
+  for(let y=1;y<maskH-1;y++)for(let x=1;x<maskW-1;x++){
+    let s=0;for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++)s+=tmp[(y+dy)*maskW+(x+dx)];
+    maskData[y*maskW+x]=s>=2?1:0;
+  }
+}
+
+/* ---- particle system (TypedArray) ---- */
+const px=new Float32Array(MAX_PARTICLES),py=new Float32Array(MAX_PARTICLES);
+const tvx=new Float32Array(MAX_PARTICLES),tvy=new Float32Array(MAX_PARTICLES);
+const pvx=new Float32Array(MAX_PARTICLES),pvy=new Float32Array(MAX_PARTICLES);
+const plife=new Float32Array(MAX_PARTICLES);
+let pCount=0;
+
+function sampleTargets(){
+  const fgIdx=[];
+  for(let i=0;i<maskData.length;i++)if(maskData[i])fgIdx.push(i);
+  const fgCount=fgIdx.length;
+  if(fgCount<5)return 0;
+
+  const scaleX=W/PROC_W,scaleY=H/PROC_H;
+  let target=Math.min(MAX_PARTICLES,Math.max(MIN_PARTICLES,Math.round(fgCount/8)));
+  /* if foreground very large (close) → more particles; small (far) → fewer */
+  const densityRatio=fgCount/(maskW*maskH);
+  target=Math.round(target*(.6+densityRatio*3));
+  target=Math.min(MAX_PARTICLES,Math.max(MIN_PARTICLES,target));
+
+  /* assign targets by sampling */
+  for(let i=0;i<target;i++){
+    const fi=fgIdx[Math.floor(Math.random()*fgCount)];
+    const fx=fi%maskW,fy=(fi-fi%maskW)/maskW;
+    tvx[i]=(fx+(Math.random()-.5))*scaleX;
+    tvy[i]=(fy+(Math.random()-.5))*scaleY;
+  }
+
+  /* spawn new particles */
+  while(pCount<target){
+    const idx=pCount;
+    px[idx]=Math.random()*W;py[idx]=Math.random()*H;
+    pvx[idx]=0;pvy[idx]=0;plife[idx]=0;
+    pCount++;
+  }
+  /* remove excess → fade */
+  for(let i=target;i<pCount;i++)plife[i]=-1;
+
+  return target;
+}
+
+function updateParticles(activeCount){
+  const lerp=0.12,damp=0.85;
+  for(let i=0;i<pCount;i++){
+    if(plife[i]<0){plife[i]++;if(plife[i]>-20){continue}else{/* dead */}}
+    if(i<activeCount){
+      const dx=tvx[i]-px[i],dy=tvy[i]-py[i];
+      pvx[i]+=dx*lerp;pvy[i]+=dy*lerp;
+      pvx[i]*=damp;pvy[i]*=damp;
+      px[i]+=pvx[i];py[i]+=pvy[i];
+      if(plife[i]<1)plife[i]+=0.05;
+    }else{
+      /* scatter */
+      pvx[i]+=(Math.random()-.5)*2;pvy[i]+=(Math.random()-.5)*2-0.5;
+      pvx[i]*=0.96;pvy[i]*=0.96;
+      px[i]+=pvx[i];py[i]+=pvy[i];
+      plife[i]-=0.04;
+    }
+  }
+  /* compact dead */
+  if(pCount>0&&plife[pCount-1]<-30)pCount=Math.max(0,pCount-1);
+}
+
+/* ---- render ---- */
+const paperPattern=(()=>{
+  const c=document.createElement("canvas");c.width=200;c.height=200;const x=c.getContext("2d");
+  x.fillStyle="#f0ece4";x.fillRect(0,0,200,200);
+  for(let i=0;i<3000;i++){x.fillStyle=`rgba(0,0,0,${Math.random()*0.04})`;x.fillRect(Math.random()*200,Math.random()*200,1,1)}
+  return c;
+})();
+let paperPat=null;
+
+function drawFrame(){
+  ctx.clearRect(0,0,W,H);
+
+  if(styleMode==="sketch"){
+    if(!paperPat)paperPat=ctx.createPattern(paperPattern,"repeat");
+    ctx.fillStyle=paperPat||"#f0ece4";ctx.fillRect(0,0,W,H);
+  }else{
+    ctx.fillStyle="rgba(10,10,15,1)";ctx.fillRect(0,0,W,H);
+  }
+
+  const activeCount=Math.min(pCount,sampleTargets());
+  updateParticles(activeCount);
+
+  /* draw mirrored */
+  ctx.save();
+  ctx.translate(W,0);ctx.scale(-1,1);
+
+  if(styleMode==="blue"){
+    drawBlue(activeCount);
+  }else if(styleMode==="pink"){
+    drawPink(activeCount);
+  }else{
+    drawSketch(activeCount);
+  }
+
+  ctx.restore();
+}
+
+function drawBlue(n){
+  /* lines */
+  ctx.strokeStyle="rgba(60,160,255,0.12)";ctx.lineWidth=0.8;
+  for(let i=0;i<n;i++){
+    if(plife[i]<=0)continue;
+    for(let j=i+1;j<Math.min(n,i+15);j++){
+      if(plife[j]<=0)continue;
+      const dx=px[i]-px[j],dy=py[i]-py[j],d2=dx*dx+dy*dy;
+      if(d2<400){ctx.beginPath();ctx.moveTo(px[i],py[i]);ctx.lineTo(px[j],py[j]);ctx.stroke()}
+    }
+  }
+  /* particles */
+  for(let i=0;i<n;i++){
+    if(plife[i]<=0)continue;
+    const a=Math.min(1,plife[i]);
+    ctx.fillStyle=`rgba(80,180,255,${a*0.85})`;
+    ctx.shadowColor="rgba(80,180,255,0.6)";ctx.shadowBlur=6;
+    ctx.beginPath();ctx.arc(px[i],py[i],2.2,0,Math.PI*2);ctx.fill();
+  }
+  ctx.shadowBlur=0;
+}
+
+function drawPink(n){
+  ctx.shadowColor="rgba(255,80,180,0.7)";ctx.shadowBlur=14;
+  for(let i=0;i<n;i++){
+    if(plife[i]<=0)continue;
+    const a=Math.min(1,plife[i]);
+    const hue=320+Math.sin(i*0.1)*30;
+    ctx.fillStyle=`hsla(${hue},90%,65%,${a*0.9})`;
+    ctx.beginPath();ctx.arc(px[i],py[i],2.8,0,Math.PI*2);ctx.fill();
+    /* trail */
+    if(!reducedMotion){
+      ctx.fillStyle=`hsla(${hue},80%,55%,${a*0.15})`;
+      ctx.beginPath();ctx.arc(px[i]-pvx[i]*3,py[i]-pvy[i]*3,2,0,Math.PI*2);ctx.fill();
+    }
+  }
+  ctx.shadowBlur=0;
+}
+
+function drawSketch(n){
+  for(let i=0;i<n;i++){
+    if(plife[i]<=0)continue;
+    const a=Math.min(1,plife[i]);
+    const g=30+Math.random()*40;
+    ctx.fillStyle=`rgba(${g},${g},${g},${a*0.9})`;
+    ctx.beginPath();ctx.arc(px[i],py[i],1.8+Math.random(),0,Math.PI*2);ctx.fill();
+  }
+}
+
+/* ---- main loop ---- */
+function loop(ts){
+  requestAnimationFrame(loop);
+  if(!ready)return;
+  if(ts-lastTime<FRAME_MS)return;
+  lastTime=ts;
+  computeMask();
+  drawFrame();
+}
+requestAnimationFrame(loop);
+
+/* ---- start ---- */
+function start(){
+  ready=false;
+  loadingEl.classList.remove("done");
+  errorEl.classList.remove("show");
+  initVideo().then(()=>initBg()).then(()=>{
+    ready=true;
+    loadingEl.classList.add("done");
+  }).catch(e=>{
+    console.error(e);
+    errorEl.classList.add("show");
+    loadingEl.classList.add("done");
+  });
+}
+
+retryBtn.addEventListener("click",()=>{
+  if(stream)stream.getTracks().forEach(t=>t.stop());
+  start();
+});
+
+document.querySelectorAll(".btn[data-style]").forEach(b=>{
+  b.addEventListener("click",()=>{
+    document.querySelectorAll(".btn[data-style]").forEach(x=>x.classList.remove("active"));
+    b.classList.add("active");
+    styleMode=b.dataset.style;
+  });
+});
+
+start();
+
+}catch(e){console.error("粒子肖像初始化失败:",e)}
+})();
+</script>
+</body>
+</html>

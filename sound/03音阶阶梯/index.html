@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
+<title>音阶阶梯</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;touch-action:none;-webkit-user-select:none;user-select:none;font-family:'Georgia','Palatino Linotype','Book Antiqua',serif}
+
+body{
+  background:linear-gradient(155deg,#0f0c29 0%,#1a1a2e 40%,#16213e 100%);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+}
+
+/* ── title ── */
+.hd{text-align:center;padding:10px 0 4px;flex-shrink:0}
+.hd h1{font-size:clamp(18px,4vw,30px);color:rgba(255,255,255,.82);letter-spacing:6px;font-weight:400}
+.hd p{font-size:12px;color:rgba(255,255,255,.32);margin-top:3px;letter-spacing:3px}
+
+/* ── staircase ── */
+.stage{
+  flex:1 1 0%;display:flex;align-items:center;justify-content:center;
+  width:100%;min-height:0;padding:4px 10px;
+}
+.stair{
+  display:grid;
+  grid-template-columns:repeat(8,1fr);
+  grid-template-rows:repeat(8,1fr);
+  width:min(94vw,calc(88vh * 5.8));
+  aspect-ratio:5.8/1;
+  gap:5px;
+}
+
+/* ── step ── */
+.s{
+  position:relative;border-radius:10px;cursor:pointer;
+  display:flex;align-items:flex-end;justify-content:center;
+  padding-bottom:14%;
+  transition:transform .18s cubic-bezier(.34,1.56,.64,1),box-shadow .25s ease,filter .2s;
+  will-change:transform;
+  -webkit-tap-highlight-color:transparent;
+}
+.s .n{
+  font-size:clamp(13px,2.4vw,24px);color:rgba(255,255,255,.88);
+  text-shadow:0 1px 4px rgba(0,0,0,.45);pointer-events:none;
+  font-weight:600;letter-spacing:1px;transition:all .2s;
+}
+.s .f{
+  position:absolute;top:10%;left:0;right:0;text-align:center;
+  font-size:clamp(9px,1.2vw,12px);color:rgba(255,255,255,.3);
+  pointer-events:none;font-style:italic;
+}
+
+/* grid placement — staircase bottom-left → top-right */
+.s:nth-child(1){grid-column:1;grid-row:8}
+.s:nth-child(2){grid-column:2;grid-row:7}
+.s:nth-child(3){grid-column:3;grid-row:6}
+.s:nth-child(4){grid-column:4;grid-row:5}
+.s:nth-child(5){grid-column:5;grid-row:4}
+.s:nth-child(6){grid-column:6;grid-row:3}
+.s:nth-child(7){grid-column:7;grid-row:2}
+.s:nth-child(8){grid-column:8;grid-row:1}
+
+/* ── rainbow colours ── */
+.s[data-i="0"]{background:linear-gradient(140deg,#ff6b6b,#e74c3c);box-shadow:0 5px 16px rgba(231,76,60,.38),inset 0 1px 0 rgba(255,255,255,.14)}
+.s[data-i="1"]{background:linear-gradient(140deg,#ffa94d,#e67e22);box-shadow:0 5px 16px rgba(230,126,34,.38),inset 0 1px 0 rgba(255,255,255,.14)}
+.s[data-i="2"]{background:linear-gradient(140deg,#ffe066,#f1c40f);box-shadow:0 5px 16px rgba(241,196,15,.38),inset 0 1px 0 rgba(255,255,255,.14)}
+.s[data-i="3"]{background:linear-gradient(140deg,#69db7c,#27ae60);box-shadow:0 5px 16px rgba(39,174,96,.38),inset 0 1px 0 rgba(255,255,255,.14)}
+.s[data-i="4"]{background:linear-gradient(140deg,#4dd8e8,#17a2b8);box-shadow:0 5px 16px rgba(23,162,184,.38),inset 0 1px 0 rgba(255,255,255,.14)}
+.s[data-i="5"]{background:linear-gradient(140deg,#748ffc,#2e86de);box-shadow:0 5px 16px rgba(46,134,222,.38),inset 0 1px 0 rgba(255,255,255,.14)}
+.s[data-i="6"]{background:linear-gradient(140deg,#b197fc,#6c5ce7);box-shadow:0 5px 16px rgba(108,92,231,.38),inset 0 1px 0 rgba(255,255,255,.14)}
+.s[data-i="7"]{background:linear-gradient(140deg,#f783ac,#e040a0);box-shadow:0 5px 16px rgba(224,64,160,.38),inset 0 1px 0 rgba(255,255,255,.14)}
+
+/* glow colours per step */
+.s[data-i="0"].on{box-shadow:0 0 28px 10px rgba(231,76,60,.55),0 0 60px 20px rgba(231,76,60,.18),inset 0 0 18px rgba(255,255,255,.22)!important}
+.s[data-i="1"].on{box-shadow:0 0 28px 10px rgba(230,126,34,.55),0 0 60px 20px rgba(230,126,34,.18),inset 0 0 18px rgba(255,255,255,.22)!important}
+.s[data-i="2"].on{box-shadow:0 0 28px 10px rgba(241,196,15,.55),0 0 60px 20px rgba(241,196,15,.18),inset 0 0 18px rgba(255,255,255,.22)!important}
+.s[data-i="3"].on{box-shadow:0 0 28px 10px rgba(39,174,96,.55),0 0 60px 20px rgba(39,174,96,.18),inset 0 0 18px rgba(255,255,255,.22)!important}
+.s[data-i="4"].on{box-shadow:0 0 28px 10px rgba(23,162,184,.55),0 0 60px 20px rgba(23,162,184,.18),inset 0 0 18px rgba(255,255,255,.22)!important}
+.s[data-i="5"].on{box-shadow:0 0 28px 10px rgba(46,134,222,.55),0 0 60px 20px rgba(46,134,222,.18),inset 0 0 18px rgba(255,255,255,.22)!important}
+.s[data-i="6"].on{box-shadow:0 0 28px 10px rgba(108,92,231,.55),0 0 60px 20px rgba(108,92,231,.18),inset 0 0 18px rgba(255,255,255,.22)!important}
+.s[data-i="7"].on{box-shadow:0 0 28px 10px rgba(224,64,160,.55),0 0 60px 20px rgba(224,64,160,.18),inset 0 0 18px rgba(255,255,255,.22)!important}
+
+/* playing state */
+.s.on{transform:translateY(-7px) scale(1.06);filter:brightness(1.25)}
+.s.on .n{color:#fff;text-shadow:0 0 10px rgba(255,255,255,.85),0 0 24px rgba(255,255,255,.35);font-size:clamp(16px,3vw,30px)}
+
+/* playback highlight */
+.s.pb{outline:2.5px solid rgba(255,255,255,.65);outline-offset:-4px}
+
+/* ── controls ── */
+.ctrls{display:flex;gap:14px;padding:10px 0 18px;align-items:center;flex-shrink:0}
+
+.btn{
+  padding:11px 26px;border:none;border-radius:50px;
+  font-size:15px;font-family:'Georgia',serif;cursor:pointer;
+  transition:all .28s;letter-spacing:1.5px;
+  background:rgba(255,255,255,.07);color:rgba(255,255,255,.65);
+  border:1px solid rgba(255,255,255,.12);
+  backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+}
+.btn:hover{background:rgba(255,255,255,.13);color:#fff}
+.btn:active{transform:scale(.95)}
+.btn.off{opacity:.32;pointer-events:none}
+
+.rec{background:rgba(231,76,60,.12);color:rgba(231,76,60,.75);border-color:rgba(231,76,60,.25)}
+.rec:hover{background:rgba(231,76,60,.22);color:#ff6b6b}
+.rec.go{background:rgba(231,76,60,.82);color:#fff;animation:pul .9s ease-in-out infinite}
+.rec.go:hover{background:rgba(231,76,60,.95)}
+
+@keyframes pul{0%,100%{box-shadow:0 0 0 0 rgba(231,76,60,.45)}50%{box-shadow:0 0 0 13px rgba(231,76,60,0)}}
+
+.sts{font-size:12px;color:rgba(255,255,255,.28);min-width:90px;text-align:center;letter-spacing:1px}
+
+/* ── ambient particles ── */
+.sparkle{
+  position:fixed;width:2px;height:2px;border-radius:50%;
+  background:rgba(255,255,255,.25);pointer-events:none;
+  animation:float linear infinite;
+}
+@keyframes float{
+  0%{opacity:0;transform:translateY(0)}
+  20%{opacity:1}
+  80%{opacity:1}
+  100%{opacity:0;transform:translateY(-100vh)}
+}
+
+/* ── responsive ── */
+@media(max-width:640px){
+  .hd h1{letter-spacing:4px}
+  .stair{width:min(97vw,calc(82vh * 5.5));gap:3px}
+  .s{border-radius:7px;padding-bottom:18%}
+  .s .n{font-size:clamp(11px,3.2vw,18px)}
+  .s .f{font-size:clamp(8px,2vw,10px)}
+  .s.on .n{font-size:clamp(13px,4vw,22px)}
+  .btn{padding:10px 18px;font-size:13px}
+  .ctrls{gap:8px}
+}
+@media(max-height:500px){
+  .hd{padding:4px 0 2px}
+  .hd h1{font-size:16px}
+  .hd p{display:none}
+  .stage{padding:2px 8px}
+  .ctrls{padding:4px 0 8px}
+}
+</style>
+</head>
+<body>
+
+<div class="hd">
+  <h1>音阶阶梯</h1>
+  <p>触控音阶弹奏</p>
+</div>
+
+<div class="stage">
+  <div class="stair" id="stair"></div>
+</div>
+
+<div class="ctrls">
+  <button class="btn rec" id="bRec">● 录制</button>
+  <button class="btn off" id="bPlay">▶ 回放</button>
+  <span class="sts" id="sts"></span>
+</div>
+
+<script>
+/* ═══════════════════════════════════════════
+   音阶阶梯 — Scale Staircase
+   Web Audio · Multi-touch · Record / Play
+   ═══════════════════════════════════════════ */
+
+const NOTES = [
+  { name:'C',  full:'C4', freq:261.63 },
+  { name:'D',  full:'D4', freq:293.66 },
+  { name:'E',  full:'E4', freq:329.63 },
+  { name:'F',  full:'F4', freq:349.23 },
+  { name:'G',  full:'G4', freq:392.00 },
+  { name:'A',  full:'A4', freq:440.00 },
+  { name:'B',  full:'B4', freq:493.88 },
+  { name:"C'", full:'C5', freq:523.25 }
+];
+
+const GLOW = [
+  '231,76,60','230,126,34','241,196,15','39,174,96',
+  '23,162,184','46,134,222','108,92,231','224,64,160'
+];
+
+/* ── audio engine ── */
+let ax = null;
+function ensureAudio(){
+  if(!ax) ax = new (window.AudioContext||window.webkitAudioContext)();
+  if(ax.state==='suspended') ax.resume();
+}
+
+function toneOn(freq, idx){
+  ensureAudio();
+  const t = ax.currentTime;
+
+  // fundamental — sine
+  const o1 = ax.createOscillator();
+  o1.type = 'sine'; o1.frequency.value = freq;
+
+  // 2nd harmonic — octave above, very soft
+  const o2 = ax.createOscillator();
+  o2.type = 'sine'; o2.frequency.value = freq*2;
+
+  // 3rd harmonic — fifth above octave, even softer
+  const o3 = ax.createOscillator();
+  o3.type = 'sine'; o3.frequency.value = freq*3;
+
+  const g1 = ax.createGain(); g1.gain.value = .32;
+  const g2 = ax.createGain(); g2.gain.value = .07;
+  const g3 = ax.createGain(); g3.gain.value = .025;
+
+  // master envelope
+  const mg = ax.createGain();
+  mg.gain.setValueAtTime(0, t);
+  mg.gain.linearRampToValueAtTime(.9, t+.012);   // fast attack
+  mg.gain.linearRampToValueAtTime(.55, t+.12);    // slight decay
+  mg.gain.linearRampToValueAtTime(.45, t+.35);    // sustain
+
+  o1.connect(g1); o2.connect(g2); o3.connect(g3);
+  g1.connect(mg); g2.connect(mg); g3.connect(mg);
+  mg.connect(ax.destination);
+
+  [o1,o2,o3].forEach(o=>o.start(t));
+  return {oscs:[o1,o2,o3], gain:mg, t0:t};
+}
+
+function toneOff(s){
+  if(!s) return;
+  const t = ax.currentTime;
+  s.gain.gain.cancelScheduledValues(t);
+  s.gain.gain.setValueAtTime(s.gain.gain.value, t);
+  s.gain.gain.linearRampToValueAtTime(0, t+.12);
+  s.oscs.forEach(o=>o.stop(t+.15));
+}
+
+/* ── DOM ── */
+const stair  = document.getElementById('stair');
+const bRec   = document.getElementById('bRec');
+const bPlay  = document.getElementById('bPlay');
+const sts    = document.getElementById('sts');
+
+const active = {};          // idx → tone state
+const els    = [];          // step elements
+
+NOTES.forEach((nt, i) => {
+  const d = document.createElement('div');
+  d.className = 's';
+  d.setAttribute('data-i', i);
+  d.innerHTML = `<span class="f">${nt.full}</span><span class="n">${nt.name}</span>`;
+  stair.appendChild(d);
+  els.push(d);
+});
+
+/* ── step interaction ── */
+function press(i){
+  if(i<0||i>7) return;
+  if(active[i]) return;          // already sounding
+  const el = els[i];
+  active[i] = toneOn(NOTES[i].freq, i);
+  el.classList.add('on');
+
+  if(recording){
+    recSeq.push({i, t:Date.now()-recStart, dur:0});
+  }
+}
+
+function release(i){
+  if(i<0||i>7) return;
+  if(!active[i]) return;
+  toneOff(active[i]);
+  delete active[i];
+  els[i].classList.remove('on');
+
+  if(recording){
+    const ev = recSeq.find(e=>e.i===i && e.dur===0);
+    if(ev) ev.dur = Date.now()-recStart - ev.t;
+  }
+}
+
+/* ── pointer events (mouse + touch) ── */
+function idxFromEvt(e){
+  const el = e.target.closest('.s');
+  if(!el) return -1;
+  return +el.getAttribute('data-i');
+}
+
+// mouse
+stair.addEventListener('mousedown', e=>{ const i=idxFromEvt(e); if(i>=0) press(i); });
+stair.addEventListener('mouseup',   e=>{ const i=idxFromEvt(e); if(i>=0) release(i); });
+stair.addEventListener('mouseleave',e=>{ const i=idxFromEvt(e); if(i>=0) release(i); });
+
+// touch (multi-touch)
+const touchMap = {};   // touchId → stepIdx
+
+stair.addEventListener('touchstart', e=>{
+  e.preventDefault();
+  for(const tc of e.changedTouches){
+    const el = document.elementFromPoint(tc.clientX, tc.clientY);
+    const s  = el && el.closest('.s');
+    if(!s) continue;
+    const i = +s.getAttribute('data-i');
+    touchMap[tc.identifier] = i;
+    press(i);
+  }
+}, {passive:false});
+
+stair.addEventListener('touchend', e=>{
+  e.preventDefault();
+  for(const tc of e.changedTouches){
+    const i = touchMap[tc.identifier];
+    if(i!==undefined){ release(i); delete touchMap[tc.identifier]; }
+  }
+}, {passive:false});
+
+stair.addEventListener('touchcancel', e=>{
+  for(const tc of e.changedTouches){
+    const i = touchMap[tc.identifier];
+    if(i!==undefined){ release(i); delete touchMap[tc.identifier]; }
+  }
+});
+
+/* ── record / playback ── */
+let recording = false, playing = false;
+let recSeq = [], recStart = 0;
+
+bRec.addEventListener('click', ()=>{
+  if(playing) return;
+  if(!recording){
+    recording = true;
+    recSeq = [];
+    recStart = Date.now();
+    bRec.classList.add('go');
+    bRec.textContent = '■ 停止';
+    bPlay.classList.add('off');
+    sts.textContent = '录制中…';
+  } else {
+    // close any still-pressed notes
+    recSeq.forEach(e=>{ if(e.dur===0) e.dur = Date.now()-recStart - e.t; });
+    recording = false;
+    bRec.classList.remove('go');
+    bRec.textContent = '● 录制';
+    if(recSeq.length){
+      bPlay.classList.remove('off');
+      sts.textContent = `已录 ${recSeq.length} 个音符`;
+    } else {
+      sts.textContent = '';
+    }
+  }
+});
+
+bPlay.addEventListener('click', ()=>{
+  if(recording||playing||!recSeq.length) return;
+  playing = true;
+  bPlay.classList.add('off');
+  bRec.classList.add('off');
+  sts.textContent = '▶ 回放中…';
+
+  const timers = [];
+  const totalMs = Math.max(...recSeq.map(e=>e.t+e.dur)) + 200;
+
+  recSeq.forEach(ev=>{
+    // press
+    timers.push(setTimeout(()=>{
+      press(ev.i);
+      els[ev.i].classList.add('pb');
+    }, ev.t));
+    // release
+    timers.push(setTimeout(()=>{
+      release(ev.i);
+      els[ev.i].classList.remove('pb');
+    }, ev.t + ev.dur));
+  });
+
+  // finish
+  timers.push(setTimeout(()=>{
+    playing = false;
+    bPlay.classList.remove('off');
+    bRec.classList.remove('off');
+    sts.textContent = `已录 ${recSeq.length} 个音符`;
+    els.forEach(e=>e.classList.remove('pb'));
+  }, totalMs));
+});
+
+/* ── ambient sparkles ── */
+function spawnSparkle(){
+  const sp = document.createElement('div');
+  sp.className = 'sparkle';
+  const x = Math.random()*100;
+  const dur = 8 + Math.random()*12;
+  const size = 1 + Math.random()*2;
+  sp.style.cssText = `left:${x}vw;bottom:-4px;width:${size}px;height:${size}px;animation-duration:${dur}s;opacity:0`;
+  document.body.appendChild(sp);
+  setTimeout(()=>sp.remove(), dur*1000);
+}
+setInterval(spawnSparkle, 2200);
+
+/* ── keyboard shortcuts (bonus) ── */
+const KEY_MAP = {'a':0,'s':1,'d':2,'f':3,'g':4,'h':5,'j':6,'k':7};
+document.addEventListener('keydown', e=>{
+  if(e.repeat) return;
+  const i = KEY_MAP[e.key.toLowerCase()];
+  if(i!==undefined) press(i);
+});
+document.addEventListener('keyup', e=>{
+  const i = KEY_MAP[e.key.toLowerCase()];
+  if(i!==undefined) release(i);
+});
+
+</script>
+</body>
+</html>

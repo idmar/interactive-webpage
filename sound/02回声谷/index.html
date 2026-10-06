@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>回声谷</title>
+<style>
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    min-height: 100vh;
+    background: linear-gradient(160deg, #0c1445 0%, #1a0a3e 100%);
+    color: #e0d8f0;
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    overflow-x: hidden;
+    user-select: none;
+  }
+
+  h1 {
+    margin-top: clamp(20px, 4vh, 40px);
+    font-size: clamp(28px, 5vw, 48px);
+    font-weight: 300;
+    letter-spacing: 0.4em;
+    text-indent: 0.4em;
+    background: linear-gradient(135deg, #7eb8ff 0%, #c084fc 50%, #f0abfc 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    text-shadow: none;
+    position: relative;
+    z-index: 2;
+  }
+
+  .subtitle {
+    font-size: 13px;
+    color: rgba(180, 170, 210, 0.6);
+    letter-spacing: 0.15em;
+    margin-top: 6px;
+    margin-bottom: clamp(10px, 2vh, 24px);
+  }
+
+  /* Echo Pool */
+  .pool-wrap {
+    position: relative;
+    width: clamp(260px, 50vmin, 420px);
+    height: clamp(260px, 50vmin, 420px);
+    flex-shrink: 0;
+  }
+
+  #echoCanvas {
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    display: block;
+  }
+
+  .pool-ring {
+    position: absolute;
+    inset: -6px;
+    border-radius: 50%;
+    border: 1px solid rgba(120, 160, 255, 0.12);
+    pointer-events: none;
+  }
+  .pool-ring:nth-child(2) { inset: -18px; border-color: rgba(120, 160, 255, 0.06); }
+  .pool-ring:nth-child(3) { inset: -34px; border-color: rgba(120, 160, 255, 0.03); }
+
+  /* Controls Panel */
+  .controls {
+    width: min(92vw, 420px);
+    margin-top: clamp(12px, 2.5vh, 28px);
+    padding: 22px 26px 18px;
+    background: rgba(255, 255, 255, 0.04);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .ctrl-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .ctrl-label {
+    font-size: 13px;
+    color: rgba(200, 190, 230, 0.75);
+    min-width: 72px;
+    flex-shrink: 0;
+  }
+
+  .ctrl-val {
+    font-size: 13px;
+    color: rgba(160, 180, 255, 0.9);
+    min-width: 44px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  input[type="range"] {
+    -webkit-appearance: none;
+    appearance: none;
+    flex: 1;
+    height: 4px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.08);
+    outline: none;
+    cursor: pointer;
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 16px; height: 16px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 40% 38%, #a78bfa, #7c3aed);
+    border: 2px solid rgba(255,255,255,0.15);
+    box-shadow: 0 0 8px rgba(139, 92, 246, 0.4);
+  }
+  input[type="range"]::-moz-range-thumb {
+    width: 16px; height: 16px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 40% 38%, #a78bfa, #7c3aed);
+    border: 2px solid rgba(255,255,255,0.15);
+    box-shadow: 0 0 8px rgba(139, 92, 246, 0.4);
+  }
+
+  /* Start Button */
+  .start-btn {
+    margin-top: 4px;
+    align-self: center;
+    padding: 12px 44px;
+    font-size: 15px;
+    letter-spacing: 0.25em;
+    text-indent: 0.25em;
+    color: #e0d8f0;
+    background: linear-gradient(135deg, rgba(99,102,241,0.35), rgba(139,92,246,0.35));
+    border: 1px solid rgba(139, 92, 246, 0.3);
+    border-radius: 40px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    backdrop-filter: blur(8px);
+  }
+  .start-btn:hover {
+    background: linear-gradient(135deg, rgba(99,102,241,0.5), rgba(139,92,246,0.5));
+    box-shadow: 0 0 20px rgba(139, 92, 246, 0.25);
+  }
+  .start-btn.active {
+    background: linear-gradient(135deg, rgba(239,68,68,0.3), rgba(220,38,38,0.3));
+    border-color: rgba(239, 68, 68, 0.35);
+  }
+
+  .status {
+    font-size: 12px;
+    text-align: center;
+    color: rgba(160, 180, 255, 0.5);
+    min-height: 18px;
+    margin-top: 2px;
+  }
+  .status.live { color: rgba(134, 239, 172, 0.7); }
+
+  /* Volume indicator */
+  .vol-bar-wrap {
+    width: 100%;
+    height: 3px;
+    background: rgba(255,255,255,0.05);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .vol-bar {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, #60a5fa, #a78bfa, #f0abfc);
+    border-radius: 2px;
+    transition: width 0.06s ease-out;
+  }
+
+  @media (max-height: 680px) {
+    h1 { margin-top: 12px; font-size: 24px; }
+    .subtitle { margin-bottom: 8px; }
+    .pool-wrap { width: 220px; height: 220px; }
+    .controls { padding: 14px 18px 12px; gap: 10px; margin-top: 8px; }
+  }
+</style>
+</head>
+<body>
+
+<h1>回 声 谷</h1>
+<p class="subtitle">ECHO VALLEY</p>
+
+<div class="pool-wrap">
+  <canvas id="echoCanvas"></canvas>
+  <div class="pool-ring"></div>
+  <div class="pool-ring"></div>
+  <div class="pool-ring"></div>
+</div>
+
+<div class="controls">
+  <div class="ctrl-row">
+    <span class="ctrl-label">回声次数</span>
+    <input type="range" id="echoCount" min="2" max="8" step="1" value="4">
+    <span class="ctrl-val" id="echoCountVal">4</span>
+  </div>
+  <div class="ctrl-row">
+    <span class="ctrl-label">回声间隔</span>
+    <input type="range" id="echoDelay" min="100" max="800" step="10" value="300">
+    <span class="ctrl-val" id="echoDelayVal">300ms</span>
+  </div>
+  <div class="ctrl-row">
+    <span class="ctrl-label">反馈衰减</span>
+    <input type="range" id="feedback" min="0.2" max="0.8" step="0.05" value="0.45">
+    <span class="ctrl-val" id="feedbackVal">0.45</span>
+  </div>
+  <div class="vol-bar-wrap"><div class="vol-bar" id="volBar"></div></div>
+  <button class="start-btn" id="startBtn">开 始</button>
+  <div class="status" id="status">点击开始，启用麦克风以体验回声</div>
+</div>
+
+<script>
+(() => {
+  /* ── DOM ── */
+  const canvas  = document.getElementById('echoCanvas');
+  const ctx     = canvas.getContext('2d');
+  const btnEl   = document.getElementById('startBtn');
+  const statEl  = document.getElementById('status');
+  const volBar  = document.getElementById('volBar');
+
+  const sliders = {
+    count:    { el: document.getElementById('echoCount'),    valEl: document.getElementById('echoCountVal')  },
+    delay:    { el: document.getElementById('echoDelay'),    valEl: document.getElementById('echoDelayVal')  },
+    feedback: { el: document.getElementById('feedback'),     valEl: document.getElementById('feedbackVal')   },
+  };
+
+  /* ── Canvas sizing ── */
+  function resize() {
+    const rect = canvas.getBoundingClientRect();
+    const dpr  = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width  = rect.width  * dpr;
+    canvas.height = rect.height * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  /* ── Slider display ── */
+  function syncSliders() {
+    sliders.count.valEl.textContent    = sliders.count.el.value;
+    sliders.delay.valEl.textContent    = sliders.delay.el.value + 'ms';
+    sliders.feedback.valEl.textContent = parseFloat(sliders.feedback.el.value).toFixed(2);
+  }
+  Object.values(sliders).forEach(s => s.el.addEventListener('input', () => { syncSliders(); rebuildGraph(); }));
+  syncSliders();
+
+  /* ── Audio graph ── */
+  let audioCtx, analyser, micStream, sourceNode, delayNodes = [], gainNodes = [], dryGain, masterGain;
+  let running = false;
+  let rafId;
+
+  function rebuildGraph() {
+    if (!audioCtx) return;
+    const count = parseInt(sliders.count.el.value);
+    const delay = parseInt(sliders.delay.el.value) / 1000;
+    const fb    = parseFloat(sliders.feedback.el.value);
+
+    // Disconnect old
+    delayNodes.forEach(n => { try { n.disconnect(); } catch(e){} });
+    gainNodes.forEach(n => { try { n.disconnect(); } catch(e){} });
+    if (dryGain) try { dryGain.disconnect(); } catch(e){}
+    delayNodes = []; gainNodes = [];
+
+    // Dry path
+    dryGain = audioCtx.createGain();
+    dryGain.gain.value = 0.7;
+    sourceNode.connect(dryGain);
+    dryGain.connect(masterGain);
+
+    // Chain: source → delay1 → gain1 → delay2 → gain2 → … → master
+    let prev = sourceNode;
+    for (let i = 0; i < count; i++) {
+      const d = audioCtx.createDelay(2.0);
+      d.delayTime.value = delay * (i + 1);
+      const g = audioCtx.createGain();
+      g.gain.value = Math.pow(fb, i + 1);
+      prev.connect(d);
+      d.connect(g);
+      g.connect(masterGain);
+      delayNodes.push(d);
+      gainNodes.push(g);
+      prev = g;
+    }
+  }
+
+  /* ── Ripple system ── */
+  const ripples = [];
+  const COLORS = [
+    [96, 165, 250],   // blue  #60a5fa
+    [167, 139, 250],  // purple #a78bfa
+    [240, 171, 252],  // pink  #f0abfc
+  ];
+
+  function lerpColor(t) {
+    t = Math.max(0, Math.min(1, t));
+    let r, g, b;
+    if (t < 0.5) {
+      const s = t * 2;
+      r = COLORS[0][0] + (COLORS[1][0] - COLORS[0][0]) * s;
+      g = COLORS[0][1] + (COLORS[1][1] - COLORS[0][1]) * s;
+      b = COLORS[0][2] + (COLORS[1][2] - COLORS[0][2]) * s;
+    } else {
+      const s = (t - 0.5) * 2;
+      r = COLORS[1][0] + (COLORS[2][0] - COLORS[1][0]) * s;
+      g = COLORS[1][1] + (COLORS[2][1] - COLORS[1][1]) * s;
+      b = COLORS[1][2] + (COLORS[2][2] - COLORS[1][2]) * s;
+    }
+    return [r, g, b];
+  }
+
+  function spawnRipple(intensity) {
+    const rect = canvas.getBoundingClientRect();
+    const cx = rect.width / 2;
+    const cy = rect.height / 2;
+    const maxR = Math.min(cx, cy) * 0.92;
+    ripples.push({ cx, cy, r: 4, maxR, alpha: 0.35 + intensity * 0.5, born: performance.now(), intensity });
+  }
+
+  let lastSpawn = 0;
+  const SPAWN_COOLDOWN = 120; // ms
+
+  /* ── Render loop ── */
+  function draw(now) {
+    rafId = requestAnimationFrame(draw);
+    const rect = canvas.getBoundingClientRect();
+    const w = rect.width, h = rect.height;
+    ctx.clearRect(0, 0, w, h);
+
+    // Background glow
+    const bgGrad = ctx.createRadialGradient(w/2, h/2, 0, w/2, h/2, w/2);
+    bgGrad.addColorStop(0, 'rgba(30, 20, 80, 0.25)');
+    bgGrad.addColorStop(1, 'rgba(10, 8, 40, 0.0)');
+    ctx.fillStyle = bgGrad;
+    ctx.fillRect(0, 0, w, h);
+
+    // Ambient pulse
+    const ambient = 0.03 + 0.015 * Math.sin(now * 0.001);
+    const ambGrad = ctx.createRadialGradient(w/2, h/2, 0, w/2, h/2, w * 0.35);
+    ambGrad.addColorStop(0, `rgba(100, 140, 255, ${ambient})`);
+    ambGrad.addColorStop(1, 'rgba(100, 140, 255, 0)');
+    ctx.fillStyle = ambGrad;
+    ctx.beginPath(); ctx.arc(w/2, h/2, w*0.35, 0, Math.PI*2); ctx.fill();
+
+    // Analyse volume
+    if (analyser && running) {
+      const buf = new Uint8Array(analyser.fftSize);
+      analyser.getByteTimeDomainData(buf);
+      let sum = 0;
+      for (let i = 0; i < buf.length; i++) { const v = (buf[i] - 128) / 128; sum += v * v; }
+      const rms = Math.sqrt(sum / buf.length);
+      const vol = Math.min(rms * 3, 1);
+      volBar.style.width = (vol * 100) + '%';
+
+      if (vol > 0.08 && now - lastSpawn > SPAWN_COOLDOWN) {
+        spawnRipple(vol);
+        lastSpawn = now;
+      }
+    }
+
+    // Update & draw ripples
+    const LIFETIME = 2200;
+    for (let i = ripples.length - 1; i >= 0; i--) {
+      const rp = ripples[i];
+      const age = now - rp.born;
+      if (age > LIFETIME) { ripples.splice(i, 1); continue; }
+      const t = age / LIFETIME;
+      const ease = 1 - Math.pow(1 - t, 0.5);
+      const radius = 4 + (rp.maxR - 4) * ease;
+      const alpha = rp.alpha * (1 - t) * (1 - t);
+      const colorT = ease;
+      const [cr, cg, cb] = lerpColor(colorT);
+
+      ctx.beginPath();
+      ctx.arc(rp.cx, rp.cy, radius, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(${cr|0},${cg|0},${cb|0},${alpha.toFixed(3)})`;
+      ctx.lineWidth = 1.8 + (1 - t) * 1.5;
+      ctx.stroke();
+
+      // Inner glow ring
+      if (t < 0.5) {
+        ctx.beginPath();
+        ctx.arc(rp.cx, rp.cy, radius * 0.92, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(${cr|0},${cg|0},${cb|0},${(alpha * 0.3).toFixed(3)})`;
+        ctx.lineWidth = 3 + (1 - t) * 2;
+        ctx.stroke();
+      }
+    }
+
+    // Center dot
+    const dotPulse = 3 + 1.5 * Math.sin(now * 0.003);
+    const dotGrad = ctx.createRadialGradient(w/2, h/2, 0, w/2, h/2, dotPulse * 3);
+    dotGrad.addColorStop(0, 'rgba(160, 180, 255, 0.6)');
+    dotGrad.addColorStop(1, 'rgba(160, 180, 255, 0)');
+    ctx.fillStyle = dotGrad;
+    ctx.beginPath(); ctx.arc(w/2, h/2, dotPulse * 3, 0, Math.PI * 2); ctx.fill();
+  }
+  rafId = requestAnimationFrame(draw);
+
+  /* ── Start / Stop ── */
+  btnEl.addEventListener('click', async () => {
+    if (!running) {
+      try {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        sourceNode = audioCtx.createMediaStreamSource(micStream);
+
+        analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 512;
+        analyser.smoothingTimeConstant = 0.7;
+
+        masterGain = audioCtx.createGain();
+        masterGain.gain.value = 0.8;
+        masterGain.connect(audioCtx.destination);
+
+        // source → analyser (visual) and source → delay chain → master
+        sourceNode.connect(analyser);
+        rebuildGraph();
+
+        running = true;
+        btnEl.textContent = '停 止';
+        btnEl.classList.add('active');
+        statEl.textContent = '正在聆听… 对着麦克风说话试试';
+        statEl.classList.add('live');
+      } catch (e) {
+        statEl.textContent = '无法启用麦克风：' + (e.message || e.name);
+      }
+    } else {
+      running = false;
+      if (micStream) micStream.getTracks().forEach(t => t.stop());
+      if (audioCtx) audioCtx.close();
+      audioCtx = null; analyser = null; sourceNode = null; micStream = null;
+      delayNodes = []; gainNodes = [];
+      btnEl.textContent = '开 始';
+      btnEl.classList.remove('active');
+      statEl.textContent = '点击开始，启用麦克风以体验回声';
+      statEl.classList.remove('live');
+      volBar.style.width = '0%';
+    }
+  });
+})();
+</script>
+</body>
+</html>

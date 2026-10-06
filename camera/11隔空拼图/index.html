@@ -1,0 +1,697 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>隔空拼图 · 手势控制 9 块挑战</title>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1675466862/camera_utils.min.js"></script>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{--bg:#0a0a12;--surface:#16162a;--accent:#6c5ce7;--accent2:#00cec9;--text:#e8e8f0;--text2:#8888a8;--radius:16px;--shadow:0 8px 32px rgba(0,0,0,.45)}
+html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Noto Sans SC",sans-serif}
+#app{position:relative;width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center}
+video#cam{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;opacity:.35;z-index:0}
+#gameArea{position:relative;z-index:1;width:100%;height:100%}
+canvas#puzzleCanvas{position:absolute;top:0;left:0;width:100%;height:100%;z-index:2;pointer-events:none}
+canvas#cursorCanvas{position:absolute;top:0;left:0;width:100%;height:100%;z-index:3;pointer-events:none}
+
+/* Header */
+#header{position:absolute;top:0;left:0;right:0;z-index:10;display:flex;align-items:center;justify-content:space-between;padding:12px 20px;background:linear-gradient(180deg,rgba(10,10,18,.92) 0%,transparent 100%)}
+#header h1{font-size:clamp(18px,4vw,28px);font-weight:700;background:linear-gradient(135deg,var(--accent),var(--accent2));-webkit-background-clip:text;-webkit-text-fill-color:transparent;letter-spacing:.05em}
+#header .sub{font-size:clamp(11px,2.2vw,14px);color:var(--text2);margin-top:2px}
+#stats{display:flex;gap:16px;font-size:clamp(13px,2.5vw,16px);font-weight:600}
+#stats span{display:flex;align-items:center;gap:4px}
+.stat-icon{font-size:1.1em}
+
+/* Controls */
+#controls{position:absolute;bottom:20px;left:50%;transform:translateX(-50%);z-index:10;display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
+.btn{padding:10px 22px;border:none;border-radius:var(--radius);font-size:clamp(13px,2.5vw,15px);font-weight:600;cursor:pointer;transition:all .25s ease;color:#fff;background:var(--surface);border:1px solid rgba(108,92,231,.3)}
+.btn:hover,.btn:active{background:var(--accent);border-color:var(--accent);transform:translateY(-1px);box-shadow:0 4px 20px rgba(108,92,231,.4)}
+.btn.primary{background:var(--accent);border-color:var(--accent)}
+.btn.primary:hover{background:#7c6cf7}
+
+/* Hint overlay */
+#hintOverlay{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);z-index:20;background:rgba(10,10,18,.95);border:1px solid rgba(108,92,231,.3);border-radius:var(--radius);padding:32px;max-width:420px;width:90%;text-align:center;box-shadow:var(--shadow);display:none}
+#hintOverlay h2{font-size:22px;margin-bottom:8px;background:linear-gradient(135deg,var(--accent),var(--accent2));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+#hintOverlay p{font-size:14px;color:var(--text2);line-height:1.7;margin-top:12px}
+#hintOverlay .btn{margin-top:20px}
+
+/* Loading */
+#loading{position:absolute;top:0;left:0;right:0;bottom:0;z-index:50;display:flex;flex-direction:column;align-items:center;justify-content:center;background:var(--bg);gap:16px}
+#loading .spinner{width:48px;height:48px;border:3px solid rgba(108,92,231,.2);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+#loading p{font-size:15px;color:var(--text2)}
+#loading .stage{font-size:12px;color:var(--text2);opacity:.6;margin-top:-8px}
+
+/* Error */
+#error{position:absolute;top:0;left:0;right:0;bottom:0;z-index:60;display:none;flex-direction:column;align-items:center;justify-content:center;background:var(--bg);gap:12px;text-align:center;padding:24px}
+#error h2{font-size:20px;color:#e17055}
+#error p{font-size:14px;color:var(--text2);max-width:360px;line-height:1.6}
+#error .btn{margin-top:8px}
+
+/* Win */
+#winOverlay{position:absolute;top:0;left:0;right:0;bottom:0;z-index:30;display:none;flex-direction:column;align-items:center;justify-content:center;background:rgba(10,10,18,.88);gap:12px}
+#winOverlay h2{font-size:clamp(28px,6vw,42px);background:linear-gradient(135deg,#ffeaa7,#fdcb6e,#f39c12);-webkit-background-clip:text;-webkit-text-fill-color:transparent;animation:pulse 1.2s ease infinite alternate}
+@keyframes pulse{from{transform:scale(1)}to{transform:scale(1.06)}}
+#winOverlay .time{font-size:18px;color:var(--accent2)}
+#winOverlay .btn{margin-top:12px}
+canvas#confetti{position:absolute;top:0;left:0;width:100%;height:100%;z-index:29;pointer-events:none}
+
+/* Reduced motion */
+@media(prefers-reduced-motion:reduce){
+  *{animation-duration:0s!important;transition-duration:0s!important}
+}
+
+/* Print */
+@media print{
+  body{background:#fff;color:#000}
+  video,#gameArea,#controls,#loading,#error,#winOverlay,canvas{display:none!important}
+  #header h1{-webkit-text-fill-color:#000}
+}
+
+/* Mobile */
+@media(max-width:600px){
+  #header{padding:8px 12px}
+  #controls{bottom:12px;gap:6px}
+  .btn{padding:8px 16px;font-size:13px}
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <video id="cam" autoplay playsinline muted></video>
+  <div id="gameArea">
+    <canvas id="puzzleCanvas"></canvas>
+    <canvas id="cursorCanvas"></canvas>
+  </div>
+  <canvas id="confetti"></canvas>
+
+  <div id="header">
+    <div>
+      <h1>隔空拼图</h1>
+      <div class="sub">手势控制 · 9 块挑战</div>
+    </div>
+    <div id="stats">
+      <span><span class="stat-icon">🧩</span><span id="placed">0</span>/9</span>
+      <span><span class="stat-icon">⏱</span><span id="timer">00:00</span></span>
+    </div>
+  </div>
+
+  <div id="controls">
+    <button class="btn primary" id="btnStart">开始</button>
+    <button class="btn" id="btnReset">重置</button>
+    <button class="btn" id="btnHint">显示提示</button>
+  </div>
+
+  <div id="hintOverlay">
+    <h2>游戏提示</h2>
+    <p>用手拿起拼图碎片，在空中移动并完成拼图。<br><br>
+    ✋ <strong>张开手</strong> → 抓取碎片<br>
+    ✊ <strong>握拳</strong> → 旋转碎片<br>
+    🖐 <strong>张开五指</strong> → 释放碎片<br><br>
+    放到正确位置附近会自动吸附！</p>
+    <button class="btn primary" id="btnCloseHint">知道了</button>
+  </div>
+
+  <div id="loading">
+    <div class="spinner"></div>
+    <p id="loadText">正在加载手势识别模型…</p>
+    <div class="stage" id="loadStage">阶段 1/3 · 初始化</div>
+  </div>
+
+  <div id="error">
+    <h2>📷 摄像头不可用</h2>
+    <p id="errorText">请允许浏览器访问摄像头，确保光线充足、双手可见。</p>
+    <button class="btn primary" id="btnRetry">重试</button>
+  </div>
+
+  <div id="winOverlay">
+    <h2>🎉 拼图完成！</h2>
+    <div class="time" id="winTime">用时 00:00</div>
+    <button class="btn primary" id="btnReplay">再来一局</button>
+  </div>
+</div>
+
+<script>
+(function(){
+"use strict";
+try {
+
+/* ── Elements ── */
+const video = document.getElementById('cam');
+const puzzleCanvas = document.getElementById('puzzleCanvas');
+const cursorCanvas = document.getElementById('cursorCanvas');
+const confettiCanvas = document.getElementById('confetti');
+const pCtx = puzzleCanvas.getContext('2d');
+const cCtx = cursorCanvas.getContext('2d');
+const fCtx = confettiCanvas.getContext('2d');
+const $placed = document.getElementById('placed');
+const $timer = document.getElementById('timer');
+const $loading = document.getElementById('loading');
+const $loadText = document.getElementById('loadText');
+const $loadStage = document.getElementById('loadStage');
+const $error = document.getElementById('error');
+const $errorText = document.getElementById('errorText');
+const $win = document.getElementById('winOverlay');
+const $winTime = document.getElementById('winTime');
+const $hintOverlay = document.getElementById('hintOverlay');
+const btnStart = document.getElementById('btnStart');
+const btnReset = document.getElementById('btnReset');
+const btnHint = document.getElementById('btnHint');
+const btnCloseHint = document.getElementById('btnCloseHint');
+const btnRetry = document.getElementById('btnRetry');
+const btnReplay = document.getElementById('btnReplay');
+
+/* ── State ── */
+const GRID = 3;
+const TOTAL = GRID * GRID;
+let pieces = [];
+let grabbedIndex = -1;
+let isGrabbing = false;
+let isFist = false;
+let prevFistAngle = null;
+let gameRunning = false;
+let startTime = 0;
+let elapsed = 0;
+let timerRAF = null;
+let showHints = false;
+let W = 0, H = 0;
+let puzzleSize = 0;
+let puzzleOX = 0, puzzleOY = 0;
+let cellSize = 0;
+let handLandmarks = null;
+let reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* ── Colors for puzzle pieces ── */
+const COLORS = [
+  ['#6c5ce7','#a29bfe'],['#00cec9','#81ecec'],['#e17055','#fab1a0'],
+  ['#fdcb6e','#ffeaa7'],['#0984e3','#74b9ff'],['#d63031','#ff7675'],
+  ['#00b894','#55efc4'],['#e84393','#fd79a8'],['#636e72','#b2bec3']
+];
+const SHAPES = ['circle','triangle','square','diamond','star','hexagon','cross','pentagon','rect'];
+
+/* ── Resize ── */
+function resize(){
+  W = window.innerWidth; H = window.innerHeight;
+  puzzleCanvas.width = W; puzzleCanvas.height = H;
+  cursorCanvas.width = W; cursorCanvas.height = H;
+  confettiCanvas.width = W; confettiCanvas.height = H;
+  const margin = Math.min(W, H) * 0.05;
+  puzzleSize = Math.min(W - margin * 2, H - margin * 2 - 80) * 0.75;
+  puzzleSize = Math.max(puzzleSize, 180);
+  cellSize = puzzleSize / GRID;
+  puzzleOX = (W - puzzleSize) / 2;
+  puzzleOY = (H - puzzleSize) / 2 + 20;
+  if(gameRunning) drawAll();
+}
+window.addEventListener('resize', resize);
+resize();
+
+/* ── Draw puzzle pattern ── */
+function drawPiecePattern(ctx, idx, x, y, w, h){
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(x, y, w, h);
+  ctx.clip();
+  const grad = ctx.createLinearGradient(x, y, x+w, y+h);
+  grad.addColorStop(0, COLORS[idx][0]);
+  grad.addColorStop(1, COLORS[idx][1]);
+  ctx.fillStyle = grad;
+  ctx.fillRect(x, y, w, h);
+  /* shape */
+  const cx = x + w/2, cy = y + h/2, r = w * 0.28;
+  ctx.fillStyle = 'rgba(255,255,255,0.25)';
+  ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+  ctx.lineWidth = 2;
+  const shape = SHAPES[idx];
+  drawShape(ctx, shape, cx, cy, r);
+  ctx.restore();
+}
+
+function drawShape(ctx, shape, cx, cy, r){
+  ctx.beginPath();
+  switch(shape){
+    case 'circle': ctx.arc(cx,cy,r,0,Math.PI*2); break;
+    case 'square': ctx.rect(cx-r,cy-r,r*2,r*2); break;
+    case 'triangle':
+      ctx.moveTo(cx,cy-r); ctx.lineTo(cx+r,cy+r); ctx.lineTo(cx-r,cy+r); ctx.closePath(); break;
+    case 'diamond':
+      ctx.moveTo(cx,cy-r); ctx.lineTo(cx+r,cy); ctx.lineTo(cx,cy+r); ctx.lineTo(cx-r,cy); ctx.closePath(); break;
+    case 'star':
+      for(let i=0;i<5;i++){const a=Math.PI/2+i*Math.PI*2/5;const b=a+Math.PI/5;
+        ctx.lineTo(cx+Math.cos(-a)*r,cy+Math.sin(-a)*r);
+        ctx.lineTo(cx+Math.cos(-b)*r*0.45,cy+Math.sin(-b)*r*0.45);}ctx.closePath(); break;
+    case 'hexagon':
+      for(let i=0;i<6;i++){const a=i*Math.PI/3;ctx.lineTo(cx+Math.cos(a)*r,cy+Math.sin(a)*r);}ctx.closePath(); break;
+    case 'cross':
+      const t=r*0.35;ctx.moveTo(cx-t,cy-r);ctx.lineTo(cx+t,cy-r);ctx.lineTo(cx+t,cy-t);ctx.lineTo(cx+r,cy-t);
+      ctx.lineTo(cx+r,cy+t);ctx.lineTo(cx+t,cy+t);ctx.lineTo(cx+t,cy+r);ctx.lineTo(cx-t,cy+r);ctx.lineTo(cx-t,cy+t);
+      ctx.lineTo(cx-r,cy+t);ctx.lineTo(cx-r,cy-t);ctx.lineTo(cx-t,cy-t);ctx.closePath(); break;
+    case 'pentagon':
+      for(let i=0;i<5;i++){const a=-Math.PI/2+i*Math.PI*2/5;ctx.lineTo(cx+Math.cos(a)*r,cy+Math.sin(a)*r);}ctx.closePath(); break;
+    case 'rect': ctx.rect(cx-r,cy-r*0.6,r*2,r*1.2); break;
+  }
+  ctx.fill(); ctx.stroke();
+}
+
+/* ── Pieces ── */
+function initPieces(){
+  pieces = [];
+  for(let i=0;i<TOTAL;i++){
+    const row = Math.floor(i/GRID), col = i%GRID;
+    pieces.push({
+      idx: i,
+      targetX: puzzleOX + col * cellSize,
+      targetY: puzzleOY + row * cellSize,
+      x: 0, y: 0,
+      rotation: 0,
+      placed: false,
+      w: cellSize,
+      h: cellSize
+    });
+  }
+  scatterPieces();
+}
+
+function scatterPieces(){
+  const margin = 40;
+  pieces.forEach((p,i) => {
+    if(p.placed) return;
+    /* scatter around puzzle area edges */
+    const side = Math.random();
+    if(side < 0.25){ p.x = margin + Math.random()*(puzzleOX - cellSize - margin); }
+    else if(side < 0.5){ p.x = puzzleOX + puzzleSize + margin + Math.random()*(W - puzzleOX - puzzleSize - cellSize - margin); }
+    else if(side < 0.75){ p.y = margin + Math.random()*(puzzleOY - cellSize - margin); p.x = puzzleOX + Math.random()*(puzzleSize - cellSize); }
+    else { p.y = puzzleOY + puzzleSize + margin + Math.random()*(H - puzzleOY - puzzleSize - cellSize - margin - 100); p.x = puzzleOX + Math.random()*(puzzleSize - cellSize); }
+    p.x = Math.max(margin, Math.min(W - cellSize - margin, p.x));
+    p.y = Math.max(margin + 60, Math.min(H - cellSize - margin - 60, p.y));
+    p.rotation = (Math.random() - 0.5) * Math.PI * 0.8;
+  });
+}
+
+/* ── Drawing ── */
+function drawAll(){
+  pCtx.clearRect(0,0,W,H);
+  /* target grid hints */
+  if(showHints){
+    pCtx.save();
+    pCtx.setLineDash([6,6]);
+    pCtx.strokeStyle = 'rgba(108,92,231,0.45)';
+    pCtx.lineWidth = 2;
+    for(let i=0;i<TOTAL;i++){
+      const r=Math.floor(i/GRID),c=i%GRID;
+      pCtx.strokeRect(puzzleOX+c*cellSize, puzzleOY+r*cellSize, cellSize, cellSize);
+      /* index label */
+      pCtx.fillStyle='rgba(108,92,231,0.3)';
+      pCtx.font='bold '+Math.round(cellSize*0.25)+'px sans-serif';
+      pCtx.textAlign='center';pCtx.textBaseline='middle';
+      pCtx.fillText(''+(i+1), puzzleOX+c*cellSize+cellSize/2, puzzleOY+r*cellSize+cellSize/2);
+    }
+    pCtx.restore();
+  }
+  /* target ghost for placed pieces */
+  pCtx.save();
+  pCtx.globalAlpha = 0.08;
+  for(let i=0;i<TOTAL;i++){
+    const r=Math.floor(i/GRID),c=i%GRID;
+    drawPiecePattern(pCtx, i, puzzleOX+c*cellSize, puzzleOY+r*cellSize, cellSize, cellSize);
+  }
+  pCtx.restore();
+
+  /* pieces */
+  pieces.forEach((p,i) => {
+    pCtx.save();
+    const cx = p.x + p.w/2, cy = p.y + p.h/2;
+    pCtx.translate(cx, cy);
+    pCtx.rotate(p.rotation);
+    pCtx.translate(-p.w/2, -p.h/2);
+    /* shadow */
+    if(!reducedMotion){
+      pCtx.shadowColor = 'rgba(0,0,0,0.5)';
+      pCtx.shadowBlur = grabbedIndex===i ? 24 : 12;
+      pCtx.shadowOffsetY = grabbedIndex===i ? 8 : 4;
+    }
+    drawPiecePattern(pCtx, p.idx, 0, 0, p.w, p.h);
+    /* border */
+    pCtx.shadowColor = 'transparent';
+    pCtx.strokeStyle = p.placed ? 'rgba(0,206,201,0.8)' : (grabbedIndex===i ? 'rgba(108,92,231,0.9)' : 'rgba(255,255,255,0.15)');
+    pCtx.lineWidth = p.placed ? 3 : (grabbedIndex===i ? 3 : 1);
+    pCtx.strokeRect(0, 0, p.w, p.h);
+    /* placed glow */
+    if(p.placed){
+      pCtx.strokeStyle = 'rgba(0,206,201,0.3)';
+      pCtx.lineWidth = 6;
+      pCtx.strokeRect(-2, -2, p.w+4, p.h+4);
+    }
+    pCtx.restore();
+  });
+}
+
+/* ── Cursor drawing ── */
+function drawCursor(landmarks){
+  cCtx.clearRect(0,0,W,H);
+  if(!landmarks) return;
+  const indexTip = landmarks[8];
+  const x = indexTip.x * W, y = indexTip.y * H;
+  /* index fingertip dot */
+  cCtx.beginPath();
+  cCtx.arc(x, y, 12, 0, Math.PI*2);
+  cCtx.fillStyle = isGrabbing ? 'rgba(108,92,231,0.7)' : 'rgba(255,255,255,0.5)';
+  cCtx.fill();
+  cCtx.beginPath();
+  cCtx.arc(x, y, 6, 0, Math.PI*2);
+  cCtx.fillStyle = isGrabbing ? '#6c5ce7' : '#fff';
+  cCtx.fill();
+  /* hand skeleton */
+  cCtx.strokeStyle = 'rgba(255,255,255,0.15)';
+  cCtx.lineWidth = 1.5;
+  const connections = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
+  connections.forEach(([a,b])=>{
+    cCtx.beginPath();
+    cCtx.moveTo(landmarks[a].x*W, landmarks[a].y*H);
+    cCtx.lineTo(landmarks[b].x*W, landmarks[b].y*H);
+    cCtx.stroke();
+  });
+}
+
+/* ── Gesture detection ── */
+function getHandState(landmarks){
+  /* Finger extended check: tip y < pip y means extended (for fingers 1-4) */
+  const tips = [8,12,16,20];
+  const pips = [6,10,14,18];
+  let extendedCount = 0;
+  for(let i=0;i<4;i++){
+    if(landmarks[tips[i]].y < landmarks[pips[i]].y) extendedCount++;
+  }
+  /* Thumb: tip x far from ip */
+  if(Math.abs(landmarks[4].x - landmarks[3].x) > 0.04) extendedCount++;
+
+  const isFist = extendedCount <= 1;
+  const isOpen = extendedCount >= 4;
+  const indexTip = { x: landmarks[8].x * W, y: landmarks[8].y * H };
+
+  /* Fist angle: use wrist(0) to middle_mcp(9) as reference */
+  const wrist = landmarks[0];
+  const middleMcp = landmarks[9];
+  const fistAngle = Math.atan2(middleMcp.y - wrist.y, middleMcp.x - wrist.x);
+
+  return { isFist, isOpen, indexTip, fistAngle, extendedCount };
+}
+
+/* ── Grab/Release logic ── */
+const GRAB_THRESHOLD = 0.12; /* fraction of cellSize */
+
+function handleGesture(state){
+  if(!gameRunning) return;
+
+  const { isFist: fist, isOpen, indexTip, fistAngle } = state;
+  const grabDist = cellSize * GRAB_THRESHOLD;
+
+  if(grabbedIndex >= 0){
+    const piece = pieces[grabbedIndex];
+    if(fist){
+      /* Rotate */
+      if(prevFistAngle !== null){
+        let delta = fistAngle - prevFistAngle;
+        if(delta > Math.PI) delta -= Math.PI*2;
+        if(delta < -Math.PI) delta += Math.PI*2;
+        piece.rotation += delta;
+      }
+      prevFistAngle = fistAngle;
+    } else {
+      prevFistAngle = null;
+    }
+
+    /* Move piece to follow finger */
+    piece.x = indexTip.x - piece.w/2;
+    piece.y = indexTip.y - piece.h/2;
+
+    /* Check snap */
+    const dx = Math.abs((piece.x + piece.w/2) - (piece.targetX + piece.w/2));
+    const dy = Math.abs((piece.y + piece.h/2) - (piece.targetY + piece.h/2));
+    const snapThreshold = cellSize * 0.25;
+    const rotSnapThreshold = Math.PI / 8;
+
+    if(dx < snapThreshold && dy < snapThreshold && (Math.abs(piece.rotation % (Math.PI*2)) < rotSnapThreshold || Math.abs(Math.abs(piece.rotation % (Math.PI*2)) - Math.PI*2) < rotSnapThreshold)){
+      piece.x = piece.targetX;
+      piece.y = piece.targetY;
+      piece.rotation = 0;
+      piece.placed = true;
+      grabbedIndex = -1;
+      isGrabbing = false;
+      updatePlaced();
+      checkWin();
+    }
+
+    /* Release if open hand and not fist */
+    if(isOpen && !fist){
+      grabbedIndex = -1;
+      isGrabbing = false;
+      prevFistAngle = null;
+    }
+  } else {
+    /* Try to grab */
+    if(!fist && !isOpen){
+      /* Find closest unplaced piece */
+      let closest = -1, closestDist = Infinity;
+      pieces.forEach((p,i) => {
+        if(p.placed) return;
+        const cx = p.x + p.w/2, cy = p.y + p.h/2;
+        const d = Math.hypot(indexTip.x - cx, indexTip.y - cy);
+        if(d < cellSize * 0.6 && d < closestDist){
+          closest = i;
+          closestDist = d;
+        }
+      });
+      if(closest >= 0){
+        grabbedIndex = closest;
+        isGrabbing = true;
+        prevFistAngle = null;
+      }
+    }
+  }
+}
+
+/* ── Stats ── */
+function updatePlaced(){
+  const count = pieces.filter(p=>p.placed).length;
+  $placed.textContent = count;
+}
+
+function startTimer(){
+  startTime = Date.now();
+  elapsed = 0;
+  function tick(){
+    if(!gameRunning) return;
+    elapsed = Math.floor((Date.now() - startTime)/1000);
+    const m = String(Math.floor(elapsed/60)).padStart(2,'0');
+    const s = String(elapsed%60).padStart(2,'0');
+    $timer.textContent = m+':'+s;
+    timerRAF = requestAnimationFrame(tick);
+  }
+  tick();
+}
+
+function stopTimer(){ cancelAnimationFrame(timerRAF); }
+
+function checkWin(){
+  if(pieces.every(p=>p.placed)){
+    gameRunning = false;
+    stopTimer();
+    showWin();
+  }
+}
+
+/* ── Win animation ── */
+let confettiParts = [];
+let confettiRAF = null;
+function showWin(){
+  const m = String(Math.floor(elapsed/60)).padStart(2,'0');
+  const s = String(elapsed%60).padStart(2,'0');
+  $winTime.textContent = '用时 '+m+':'+s;
+  $win.style.display = 'flex';
+  if(!reducedMotion) startConfetti();
+}
+
+function startConfetti(){
+  confettiParts = [];
+  for(let i=0;i<120;i++){
+    confettiParts.push({
+      x: Math.random()*W, y: -20 - Math.random()*H*0.5,
+      vx: (Math.random()-0.5)*4, vy: 2+Math.random()*4,
+      size: 4+Math.random()*8,
+      color: ['#6c5ce7','#00cec9','#fdcb6e','#e17055','#00b894','#e84393','#74b9ff','#ff7675'][Math.floor(Math.random()*8)],
+      rot: Math.random()*Math.PI*2, vr: (Math.random()-0.5)*0.2,
+      life: 1
+    });
+  }
+  function drawConfetti(){
+    fCtx.clearRect(0,0,W,H);
+    let alive = 0;
+    confettiParts.forEach(p=>{
+      if(p.life<=0) return;
+      alive++;
+      p.x += p.vx; p.y += p.vy; p.vy += 0.08; p.rot += p.vr;
+      if(p.y > H+20) p.life = 0;
+      fCtx.save();
+      fCtx.translate(p.x, p.y);
+      fCtx.rotate(p.rot);
+      fCtx.fillStyle = p.color;
+      fCtx.globalAlpha = Math.min(1, p.life);
+      fCtx.fillRect(-p.size/2, -p.size/4, p.size, p.size/2);
+      fCtx.restore();
+      p.life -= 0.003;
+    });
+    if(alive > 0) confettiRAF = requestAnimationFrame(drawConfetti);
+    else fCtx.clearRect(0,0,W,H);
+  }
+  drawConfetti();
+}
+
+function stopConfetti(){
+  cancelAnimationFrame(confettiRAF);
+  fCtx.clearRect(0,0,W,H);
+  confettiParts = [];
+}
+
+/* ── MediaPipe Hands ── */
+let hands = null;
+let cameraLoop = null;
+
+function initHands(){
+  return new Promise((resolve, reject) => {
+    try {
+      $loadText.textContent = '正在加载手势识别模型…';
+      $loadStage.textContent = '阶段 2/3 · 加载模型';
+      hands = new Hands({
+        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/${file}`
+      });
+      hands.setOptions({
+        maxNumHands: 2,
+        modelComplexity: 1,
+        minDetectionConfidence: 0.6,
+        minTrackingConfidence: 0.5
+      });
+      hands.onResults(onHandResults);
+      resolve();
+    } catch(e){ reject(e); }
+  });
+}
+
+function onHandResults(results){
+  handLandmarks = null;
+  if(results.multiHandLandmarks && results.multiHandLandmarks.length > 0){
+    handLandmarks = results.multiHandLandmarks[0];
+    const state = getHandState(handLandmarks);
+    handleGesture(state);
+    drawCursor(handLandmarks);
+  } else {
+    drawCursor(null);
+    /* release if hand lost */
+    if(grabbedIndex >= 0){
+      grabbedIndex = -1;
+      isGrabbing = false;
+      prevFistAngle = null;
+    }
+  }
+  drawAll();
+}
+
+async function startCamera(){
+  $loadText.textContent = '正在启动摄像头…';
+  $loadStage.textContent = '阶段 3/3 · 连接摄像头';
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'user', width: {ideal:1280}, height: {ideal:720} },
+      audio: false
+    });
+    video.srcObject = stream;
+    await video.play();
+    cameraLoop = new Camera(video, {
+      onFrame: async () => { if(hands) await hands.send({image: video}), requestAnimationFrame(()=>{}); },
+      width: 1280, height: 720
+    });
+    cameraLoop.start();
+    $loading.style.display = 'none';
+    $error.style.display = 'none';
+  } catch(e){
+    $loading.style.display = 'none';
+    $errorText.textContent = e.name === 'NotAllowedError'
+      ? '摄像头权限被拒绝。请在浏览器设置中允许访问摄像头后重试。'
+      : '无法访问摄像头：' + (e.message || '未知错误');
+    $error.style.display = 'flex';
+  }
+}
+
+/* ── Game flow ── */
+function startGame(){
+  resize();
+  initPieces();
+  gameRunning = true;
+  grabbedIndex = -1;
+  isGrabbing = false;
+  prevFistAngle = null;
+  showHints = false;
+  updatePlaced();
+  startTimer();
+  drawAll();
+  btnStart.textContent = '进行中…';
+  btnStart.disabled = true;
+}
+
+function resetGame(){
+  gameRunning = false;
+  stopTimer();
+  stopConfetti();
+  $win.style.display = 'none';
+  grabbedIndex = -1;
+  isGrabbing = false;
+  prevFistAngle = null;
+  $timer.textContent = '00:00';
+  $placed.textContent = '0';
+  btnStart.textContent = '开始';
+  btnStart.disabled = false;
+  resize();
+  initPieces();
+  drawAll();
+  cCtx.clearRect(0,0,W,H);
+}
+
+/* ── Events ── */
+btnStart.addEventListener('click', startGame);
+btnReset.addEventListener('click', resetGame);
+btnHint.addEventListener('click', ()=>{ showHints = true; $hintOverlay.style.display='block'; drawAll(); });
+btnCloseHint.addEventListener('click', ()=>{ $hintOverlay.style.display='none'; });
+btnRetry.addEventListener('click', ()=>{ $error.style.display='none'; $loading.style.display='flex'; startCamera(); });
+btnReplay.addEventListener('click', ()=>{ stopConfetti(); $win.style.display='none'; resetGame(); startGame(); });
+
+/* ── Init ── */
+async function init(){
+  try {
+    await initHands();
+    await startCamera();
+    initPieces();
+    drawAll();
+  } catch(e){
+    $loading.style.display = 'none';
+    $errorText.textContent = '初始化失败：' + (e.message || '请刷新页面重试');
+    $error.style.display = 'flex';
+  }
+}
+init();
+
+} catch(e){
+  console.error('隔空拼图初始化错误:', e);
+  const errDiv = document.getElementById('error');
+  const errText = document.getElementById('errorText');
+  if(errDiv && errText){
+    document.getElementById('loading').style.display='none';
+    errText.textContent = '程序异常：' + (e.message || '请刷新页面');
+    errDiv.style.display = 'flex';
+  }
+}
+})();
+</script>
+</body>
+</html>

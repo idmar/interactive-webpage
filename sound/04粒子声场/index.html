@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>粒子声场</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #000; font-family: 'Courier New', monospace; }
+  canvas { display: block; position: fixed; top: 0; left: 0; z-index: 1; }
+  #overlay {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    z-index: 10; display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    background: radial-gradient(ellipse at center, rgba(10,10,30,0.95) 0%, rgba(0,0,0,0.99) 100%);
+    transition: opacity 0.8s ease-out;
+  }
+  #overlay.hidden { opacity: 0; pointer-events: none; }
+  #startBtn {
+    position: relative; padding: 18px 60px; font-size: 20px; letter-spacing: 8px;
+    color: #0ff; background: transparent; border: 1px solid rgba(0,255,255,0.4);
+    cursor: pointer; text-transform: uppercase; font-family: 'Courier New', monospace;
+    transition: all 0.3s ease; overflow: hidden;
+  }
+  #startBtn::before {
+    content: ''; position: absolute; top: 0; left: -100%; width: 100%; height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(0,255,255,0.15), transparent);
+    animation: btnSweep 2.5s infinite;
+  }
+  @keyframes btnSweep { 0%{left:-100%} 100%{left:100%} }
+  #startBtn:hover {
+    border-color: rgba(0,255,255,0.9); box-shadow: 0 0 30px rgba(0,255,255,0.3), inset 0 0 30px rgba(0,255,255,0.1);
+    color: #fff; text-shadow: 0 0 10px rgba(0,255,255,0.8);
+  }
+  #title {
+    font-size: 42px; letter-spacing: 16px; color: rgba(0,255,255,0.7);
+    margin-bottom: 50px; text-shadow: 0 0 40px rgba(0,255,255,0.3);
+    font-weight: 100;
+  }
+  #subtitle {
+    margin-top: 30px; font-size: 12px; letter-spacing: 4px;
+    color: rgba(255,255,255,0.25); text-transform: uppercase;
+  }
+  #hud {
+    position: fixed; top: 16px; left: 20px; z-index: 5;
+    font-size: 11px; color: rgba(0,255,255,0.35); letter-spacing: 2px;
+    pointer-events: none; line-height: 1.8;
+  }
+  #volumeBar {
+    position: fixed; right: 20px; top: 50%; transform: translateY(-50%);
+    width: 4px; height: 200px; background: rgba(255,255,255,0.05);
+    z-index: 5; border-radius: 2px; overflow: hidden;
+  }
+  #volumeFill {
+    position: absolute; bottom: 0; width: 100%; height: 0%;
+    background: linear-gradient(to top, #0ff, #f0f);
+    border-radius: 2px; transition: height 0.05s;
+  }
+</style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<div id="hud">
+  <div>RMS: <span id="rmsVal">0.000</span></div>
+  <div>FPS: <span id="fpsVal">0</span></div>
+  <div> particles: <span id="pCount">400</span></div>
+</div>
+<div id="volumeBar"><div id="volumeFill"></div></div>
+
+<div id="overlay">
+  <div id="title">粒 子 声 场</div>
+  <button id="startBtn">启 动</button>
+  <div id="subtitle">PARTICLE SOUND FIELD — MICROPHONE REQUIRED</div>
+</div>
+
+<script>
+(() => {
+  // ============ CONFIG ============
+  const PARTICLE_COUNT = 400;
+  const CONNECTION_DIST = 100;
+  const TRAIL_ALPHA = 0.08;
+  const MAX_SPEED = 6;
+
+  // ============ DOM ============
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+  const overlay = document.getElementById('overlay');
+  const startBtn = document.getElementById('startBtn');
+  const rmsValEl = document.getElementById('rmsVal');
+  const fpsValEl = document.getElementById('fpsVal');
+  const volumeFill = document.getElementById('volumeFill');
+
+  let W, H;
+  function resize() {
+    W = canvas.width = window.innerWidth;
+    H = canvas.height = window.innerHeight;
+  }
+  resize();
+  window.addEventListener('resize', resize);
+
+  // ============ AUDIO ============
+  let audioCtx, analyser, dataArray, timeArray, freqLen;
+
+  async function initAudio() {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const source = audioCtx.createMediaStreamSource(stream);
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 512;
+    analyser.smoothingTimeConstant = 0.8;
+    source.connect(analyser);
+    freqLen = analyser.frequencyBinCount;
+    dataArray = new Uint8Array(freqLen);
+    timeArray = new Uint8Array(freqLen);
+  }
+
+  // ============ AUDIO METRICS ============
+  let rms = 0, bassEnergy = 0, midEnergy = 0, highEnergy = 0;
+
+  function analyzeAudio() {
+    if (!analyser) return;
+    analyser.getByteTimeDomainData(timeArray);
+    analyser.getByteFrequencyData(dataArray);
+
+    // RMS from time domain
+    let sum = 0;
+    for (let i = 0; i < timeArray.length; i++) {
+      const v = (timeArray[i] - 128) / 128;
+      sum += v * v;
+    }
+    rms = Math.sqrt(sum / timeArray.length);
+
+    // Frequency bands
+    const binCount = freqLen;
+    const bassEnd = Math.floor(binCount * 0.15);
+    const midEnd = Math.floor(binCount * 0.5);
+
+    let bassSum = 0, midSum = 0, highSum = 0;
+    for (let i = 0; i < bassEnd; i++) bassSum += dataArray[i];
+    for (let i = bassEnd; i < midEnd; i++) midSum += dataArray[i];
+    for (let i = midEnd; i < binCount; i++) highSum += dataArray[i];
+
+    bassEnergy = bassSum / (bassEnd * 255);
+    midEnergy = midSum / ((midEnd - bassEnd) * 255);
+    highEnergy = highSum / ((binCount - midEnd) * 255);
+  }
+
+  // ============ PARTICLE ============
+  class Particle {
+    constructor() { this.reset(true); }
+    reset(init) {
+      this.x = Math.random() * W;
+      this.y = Math.random() * H;
+      this.vx = (Math.random() - 0.5) * 1.2;
+      this.vy = (Math.random() - 0.5) * 1.2;
+      this.ax = 0;
+      this.ay = 0;
+      this.baseRadius = 1.2 + Math.random() * 1.8;
+      this.radius = this.baseRadius;
+      this.hue = Math.random() * 360;
+      this.saturation = 80 + Math.random() * 20;
+      this.lightness = 40 + Math.random() * 20;
+      this.alpha = 0.3 + Math.random() * 0.3;
+      this.life = 1;
+      // individual response factor
+      this.sensitivity = 0.6 + Math.random() * 0.8;
+      this.angle = Math.random() * Math.PI * 2;
+      this.wanderSpeed = 0.002 + Math.random() * 0.005;
+    }
+    update(dt) {
+      // wandering force
+      this.angle += this.wanderSpeed * (1 + highEnergy * 8);
+      this.ax = Math.cos(this.angle) * 0.03;
+      this.ay = Math.sin(this.angle) * 0.03;
+
+      // audio-driven forces
+      const intensity = rms * this.sensitivity;
+      const burst = Math.pow(rms, 2) * 3;
+
+      // bass → size pulse
+      this.radius = this.baseRadius + bassEnergy * 8 * this.sensitivity;
+
+      // mid → hue shift
+      this.hue = (this.hue + midEnergy * 2 * this.sensitivity) % 360;
+
+      // high → speed boost
+      const speedMult = 1 + highEnergy * 5 * this.sensitivity;
+
+      // burst outward from center on loud sounds
+      if (burst > 0.3) {
+        const cx = W / 2, cy = H / 2;
+        const dx = this.x - cx, dy = this.y - cy;
+        const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+        this.ax += (dx / dist) * burst * 0.5;
+        this.ay += (dy / dist) * burst * 0.5;
+      }
+
+      // integrate
+      this.vx += this.ax;
+      this.vy += this.ay;
+      const speed = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
+      const maxS = MAX_SPEED * speedMult;
+      if (speed > maxS) {
+        this.vx = (this.vx / speed) * maxS;
+        this.vy = (this.vy / speed) * maxS;
+      }
+
+      // damping
+      this.vx *= 0.97;
+      this.vy *= 0.97;
+
+      this.x += this.vx * dt;
+      this.y += this.vy * dt;
+
+      // visual response to volume
+      this.alpha = 0.15 + intensity * 2.5;
+      this.lightness = 30 + intensity * 50 + midEnergy * 20;
+      this.saturation = 70 + highEnergy * 30;
+
+      // wrap edges with padding
+      const pad = 50;
+      if (this.x < -pad) this.x = W + pad;
+      if (this.x > W + pad) this.x = -pad;
+      if (this.y < -pad) this.y = H + pad;
+      if (this.y > H + pad) this.y = -pad;
+    }
+    draw() {
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, Math.max(0.5, this.radius), 0, Math.PI * 2);
+      ctx.fillStyle = `hsla(${this.hue},${this.saturation}%,${this.lightness}%,${Math.min(1, this.alpha)})`;
+      ctx.fill();
+
+      // glow on loud
+      if (rms > 0.15) {
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.radius * 2.5, 0, Math.PI * 2);
+        ctx.fillStyle = `hsla(${this.hue},${this.saturation}%,${this.lightness}%,${rms * 0.15})`;
+        ctx.fill();
+      }
+    }
+  }
+
+  // ============ PARTICLE POOL ============
+  let particles = [];
+  function initParticles() {
+    particles = [];
+    for (let i = 0; i < PARTICLE_COUNT; i++) {
+      particles.push(new Particle());
+    }
+  }
+  initParticles();
+
+  // ============ CONNECTIONS (spatial hash) ============
+  function drawConnections() {
+    const cellSize = CONNECTION_DIST;
+    const grid = new Map();
+
+    // build grid
+    for (let i = 0; i < particles.length; i++) {
+      const p = particles[i];
+      const cx = (p.x / cellSize) | 0;
+      const cy = (p.y / cellSize) | 0;
+      const key = cx + ',' + cy;
+      if (!grid.has(key)) grid.set(key, []);
+      grid.get(key).push(i);
+    }
+
+    const maxDist2 = CONNECTION_DIST * CONNECTION_DIST;
+    const lineAlphaBase = 0.06 + rms * 0.35;
+
+    for (const [key, cell] of grid) {
+      const parts = key.split(',');
+      const cx = +parts[0], cy = +parts[1];
+
+      // check this cell + neighbors
+      for (let dx = 0; dx <= 1; dx++) {
+        for (let dy = -1; dy <= 1; dy++) {
+          const nkey = (cx + dx) + ',' + (cy + dy);
+          const neighbor = grid.get(nkey);
+          if (!neighbor) continue;
+
+          for (const i of cell) {
+            const a = particles[i];
+            for (const j of neighbor) {
+              if (j <= i) continue;
+              const b = particles[j];
+              const ddx = a.x - b.x, ddy = a.y - b.y;
+              const d2 = ddx * ddx + ddy * ddy;
+              if (d2 < maxDist2) {
+                const d = Math.sqrt(d2);
+                const alpha = (1 - d / CONNECTION_DIST) * lineAlphaBase;
+                const hue = (a.hue + b.hue) / 2;
+                ctx.beginPath();
+                ctx.moveTo(a.x, a.y);
+                ctx.lineTo(b.x, b.y);
+                ctx.strokeStyle = `hsla(${hue},80%,55%,${alpha})`;
+                ctx.lineWidth = 0.5 + rms * 1.5;
+                ctx.stroke();
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // ============ RENDER LOOP ============
+  let lastTime = 0, frameCount = 0, fpsTime = 0, fps = 0;
+
+  function render(now) {
+    requestAnimationFrame(render);
+
+    const dt = Math.min((now - lastTime) / 16.667, 3) || 1;
+    lastTime = now;
+
+    // FPS counter
+    frameCount++;
+    if (now - fpsTime > 1000) {
+      fps = frameCount;
+      frameCount = 0;
+      fpsTime = now;
+      fpsValEl.textContent = fps;
+    }
+
+    analyzeAudio();
+
+    // Trail effect: semi-transparent black overlay
+    ctx.fillStyle = `rgba(0,0,0,${TRAIL_ALPHA + rms * 0.05})`;
+    ctx.fillRect(0, 0, W, H);
+
+    // Center glow on loud sounds
+    if (rms > 0.12) {
+      const grad = ctx.createRadialGradient(W/2, H/2, 0, W/2, H/2, W * 0.4);
+      const hue = (midEnergy * 200 + bassEnergy * 60) % 360;
+      grad.addColorStop(0, `hsla(${hue},100%,50%,${rms * 0.08})`);
+      grad.addColorStop(1, 'transparent');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    // Update & draw particles
+    for (const p of particles) p.update(dt);
+    drawConnections();
+    for (const p of particles) p.draw();
+
+    // HUD
+    rmsValEl.textContent = rms.toFixed(3);
+    volumeFill.style.height = Math.min(100, rms * 300) + '%';
+  }
+
+  // ============ START ============
+  startBtn.addEventListener('click', async () => {
+    try {
+      await initAudio();
+      overlay.classList.add('hidden');
+      requestAnimationFrame(render);
+    } catch (e) {
+      alert('麦克风权限被拒绝，请允许麦克风访问后刷新页面重试。\n\n' + e.message);
+    }
+  });
+
+  // pre-fill particle count HUD
+  document.getElementById('pCount').textContent = PARTICLE_COUNT;
+})();
+</script>
+</body>
+</html>

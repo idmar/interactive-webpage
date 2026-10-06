@@ -1,0 +1,370 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
+<title>体感接球 - MoveNet 姿态识别</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{--bg:#0f0f13;--card:#1a1a24;--accent:#6c5ce7;--accent2:#a29bfe;--text:#e8e8ef;--text-dim:#8888a0;--success:#00b894;--danger:#ff6b6b;--radius:16px;--shadow:0 8px 32px rgba(0,0,0,.4)}
+html{font-size:16px}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--text);min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:12px;line-height:1.5}
+h1{font-size:1.6rem;font-weight:700;text-align:center}
+.subtitle{font-size:.85rem;color:var(--text-dim);text-align:center;margin-top:2px}
+.card{background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow);padding:16px;width:100%;max-width:480px;margin-top:12px}
+.tip{font-size:.78rem;color:var(--text-dim);text-align:center;line-height:1.6;margin-top:8px}
+.status-bar{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:rgba(255,255,255,.05);border-radius:10px;margin-bottom:8px;font-size:.9rem;font-weight:600}
+.status-bar span{display:flex;align-items:center;gap:4px}
+#gameArea{position:relative;width:100%;aspect-ratio:3/4;background:#12121a;border-radius:12px;overflow:hidden}
+#gameArea video,#gameArea canvas{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover}
+#gameCanvas{z-index:2}
+#videoEl{z-index:1;opacity:.5;transform:scaleX(-1)}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:10px 24px;border:none;border-radius:10px;font-size:.95rem;font-weight:600;cursor:pointer;transition:transform .15s,opacity .15s;color:#fff;background:var(--accent)}
+.btn:hover{transform:scale(1.03)}
+.btn:active{transform:scale(.97)}
+.btn:disabled{opacity:.4;cursor:not-allowed;transform:none}
+.btn-secondary{background:rgba(255,255,255,.1)}
+.controls{display:flex;justify-content:center;gap:10px;margin-top:12px;flex-wrap:wrap}
+/* loading overlay */
+#loadingOverlay{position:absolute;inset:0;z-index:10;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(15,15,19,.92);gap:12px;border-radius:12px}
+#loadingOverlay.hidden{display:none}
+.spinner{width:36px;height:36px;border:3px solid rgba(255,255,255,.15);border-top-color:var(--accent2);border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+#loadingText{font-size:.9rem;color:var(--text-dim);text-align:center}
+/* game over overlay */
+#gameOverOverlay{position:absolute;inset:0;z-index:10;display:none;flex-direction:column;align-items:center;justify-content:center;background:rgba(15,15,19,.88);gap:10px;border-radius:12px}
+#gameOverOverlay.show{display:flex}
+#gameOverOverlay h2{font-size:1.5rem;color:var(--danger)}
+#gameOverOverlay .score-display{font-size:2.5rem;font-weight:800;color:var(--accent2)}
+/* error */
+#errorBox{display:none;text-align:center;padding:20px}
+#errorBox.show{display:block}
+#errorBox p{margin-bottom:12px;color:var(--danger);font-size:.9rem}
+footer{margin-top:auto;padding:16px 8px 8px;font-size:.72rem;color:var(--text-dim);text-align:center;max-width:480px}
+footer a{color:var(--accent2)}
+/* https warning */
+.https-warn{background:#2d1f00;border:1px solid #664d00;border-radius:10px;padding:10px 14px;font-size:.78rem;color:#ffc107;text-align:center;margin-top:10px;display:none}
+.https-warn.show{display:block}
+/* reduced motion */
+@media(prefers-reduced-motion:reduce){
+.spinner{animation:none;border-top-color:transparent}
+.btn:hover{transform:none}
+}
+/* print */
+@media print{
+.card,#gameArea,.controls,.https-warn,footer{display:none!important}
+body{background:#fff;color:#000}
+}
+</style>
+</head>
+<body>
+
+<h1>🏐 体感接球</h1>
+<p class="subtitle">MoveNet 姿态识别 · 纯前端小游戏</p>
+
+<div class="card">
+  <div class="status-bar">
+    <span>🎯 分数: <b id="scoreEl">0</b></span>
+    <span>🏆 最高: <b id="highScoreEl">0</b></span>
+  </div>
+  <div id="gameArea">
+    <video id="videoEl" autoplay playsinline muted></video>
+    <canvas id="gameCanvas"></canvas>
+    <div id="loadingOverlay">
+      <div class="spinner" id="spinnerEl"></div>
+      <p id="loadingText">正在初始化摄像头…</p>
+    </div>
+    <div id="gameOverOverlay">
+      <h2>💥 游戏结束</h2>
+      <p>得分</p>
+      <div class="score-display" id="finalScoreEl">0</div>
+      <button class="btn" id="restartBtn2" style="margin-top:8px">🔄 重新开始</button>
+    </div>
+    <div id="errorBox">
+      <p id="errorMsg">摄像头访问失败，请检查权限设置。</p>
+      <button class="btn" id="retryBtn">🔄 重试</button>
+    </div>
+  </div>
+  <p class="tip">💡 站在镜头前，全身入镜！用身体左右移动控制挡板，不要让球落地。<br>保持背景干净，距离摄像头 1.5~2 米。</p>
+  <div class="controls">
+    <button class="btn" id="startBtn" disabled>🎮 开始游戏</button>
+    <button class="btn btn-secondary" id="restartBtn" disabled>🔄 重新开始</button>
+  </div>
+  <div class="https-warn" id="httpsWarn">⚠️ 摄像头功能需要 HTTPS 或 localhost 环境才能运行。请通过安全连接访问本页面。</div>
+</div>
+
+<footer>
+  🔒 所有画面仅在本机浏览器处理，不会上传至任何服务器。<br>
+  基于 <a href="https://www.tensorflow.org/js" target="_blank" rel="noopener">TensorFlow.js</a> MoveNet 模型
+</footer>
+
+<script>
+(function(){
+"use strict";
+try {
+
+/* ── DOM refs ── */
+const videoEl=document.getElementById("videoEl");
+const gameCanvas=document.getElementById("gameCanvas");
+const ctx=gameCanvas.getContext("2d");
+const scoreEl=document.getElementById("scoreEl");
+const highScoreEl=document.getElementById("highScoreEl");
+const loadingOverlay=document.getElementById("loadingOverlay");
+const loadingText=document.getElementById("loadingText");
+const spinnerEl=document.getElementById("spinnerEl");
+const gameOverOverlay=document.getElementById("gameOverOverlay");
+const finalScoreEl=document.getElementById("finalScoreEl");
+const errorBox=document.getElementById("errorBox");
+const errorMsg=document.getElementById("errorMsg");
+const startBtn=document.getElementById("startBtn");
+const restartBtn=document.getElementById("restartBtn");
+const retryBtn=document.getElementById("retryBtn");
+const restartBtn2=document.getElementById("restartBtn2");
+const httpsWarn=document.getElementById("httpsWarn");
+
+/* ── State ── */
+let score=0, highScore=+localStorage.getItem("catchball_high")||0;
+let gameRunning=false, animId=null;
+let balls=[], paddleX=0.5; // 0-1 normalized
+const paddleW=0.18, paddleH=0.025;
+let baseSpeed=0.003, spawnInterval=2000, lastSpawn=0;
+let detector=null;
+let modelReady=false;
+
+highScoreEl.textContent=highScore;
+
+/* ── HTTPS check ── */
+function isSecure(){
+  return location.protocol==="https:"||location.hostname==="localhost"||location.hostname==="127.0.0.1"||location.hostname==="";
+}
+if(!isSecure()) httpsWarn.classList.add("show");
+
+/* ── Resize canvas ── */
+function resizeCanvas(){
+  const r=gameCanvas.getBoundingClientRect();
+  gameCanvas.width=r.width*devicePixelRatio;
+  gameCanvas.height=r.height*devicePixelRatio;
+  ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);
+}
+window.addEventListener("resize",resizeCanvas);
+
+/* ── Load scripts dynamically ── */
+function loadScript(src){
+  return new Promise((res,rej)=>{
+    const s=document.createElement("script");
+    s.src=src;s.crossOrigin="anonymous";
+    s.onload=res;s.onerror=()=>rej(new Error("脚本加载失败: "+src));
+    document.head.appendChild(s);
+  });
+}
+
+async function loadDeps(){
+  loadingText.textContent="正在加载 TensorFlow.js 核心…";
+  await loadScript("https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core@4.22.0/dist/tf-core.min.js");
+  await loadScript("https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter@4.22.0/dist/tf-converter.min.js");
+  await loadScript("https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl@4.22.0/dist/tf-backend-webgl.min.js");
+  await loadScript("https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2.1.3/dist/pose-detection.min.js");
+}
+
+/* ── Camera ── */
+async function startCamera(){
+  loadingText.textContent="正在请求摄像头权限…";
+  try{
+    const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"user",width:{ideal:640},height:{ideal:480}},audio:false});
+    videoEl.srcObject=stream;
+    await new Promise(r=>{videoEl.onloadedmetadata=r;});
+    await videoEl.play();
+    resizeCanvas();
+  }catch(e){
+    throw new Error("摄像头访问被拒绝或不可用: "+e.message);
+  }
+}
+
+/* ── Model ── */
+async function loadModel(){
+  loadingText.textContent="正在下载 MoveNet 模型（首次约 10MB）…";
+  await tf.ready();
+  const dp=poseDetection;
+  detector=await dp.createDetector(dp.SupportedModels.MoveNet,{
+    modelType:dp.MoveNetModelType.SINGLEPOSE_LIGHTNING
+  });
+  modelReady=true;
+}
+
+/* ── Pose detect loop ── */
+let poseX=null;
+async function detectPose(){
+  if(!modelReady||!gameRunning) return;
+  try{
+    const poses=await detector.estimatePoses(videoEl);
+    if(poses&&poses.length>0){
+      const kp=poses[0].keypoints;
+      // Use average of left & right shoulder
+      const ls=kp.find(k=>k.name==="left_shoulder");
+      const rs=kp.find(k=>k.name==="right_shoulder");
+      const head=kp.find(k=>k.name==="nose");
+      if(ls&&ls.score>0.3&&rs&&rs.score>0.3){
+        poseX=(ls.x+rs.x)/2/videoEl.videoWidth;
+      }else if(head&&head.score>0.3){
+        poseX=head.x/videoEl.videoWidth;
+      }
+    }
+  }catch(e){/* skip frame */}
+  if(gameRunning) requestAnimationFrame(detectPose);
+}
+
+/* ── Game logic ── */
+function spawnBall(){
+  balls.push({x:0.1+Math.random()*0.8, y:-0.05, speed:baseSpeed+score*0.0004, r:0.018});
+}
+
+function resetGame(){
+  score=0;balls=[];lastSpawn=0;
+  baseSpeed=0.003;spawnInterval=2000;
+  scoreEl.textContent=0;
+  gameOverOverlay.classList.remove("show");
+}
+
+function updateGame(dt){
+  const cw=gameCanvas.width/devicePixelRatio;
+  const ch=gameCanvas.height/devicePixelRatio;
+
+  // paddle smoothing
+  if(poseX!==null){
+    const target=Math.max(paddleW/2,Math.min(1-paddleW/2,poseX));
+    paddleX+=(target-paddleX)*0.15;
+  }
+
+  // spawn
+  lastSpawn+=dt;
+  const interval=Math.max(400,spawnInterval-score*80);
+  if(lastSpawn>=interval){spawnBall();lastSpawn=0;}
+
+  // extra balls at higher scores
+  if(score>=10&&balls.length<2+Math.floor(score/10)) spawnBall();
+
+  // update balls
+  for(let i=balls.length-1;i>=0;i--){
+    const b=balls[i];
+    b.y+=b.speed*(dt/16);
+    // check paddle collision
+    const py=1-paddleH-0.02;
+    if(b.y+b.r>=py&&b.y-b.r<=py+paddleH){
+      if(Math.abs(b.x-paddleX)<paddleW/2+b.r){
+        balls.splice(i,1);score++;scoreEl.textContent=score;
+        if(score>highScore){highScore=score;highScoreEl.textContent=highScore;localStorage.setItem("catchball_high",highScore);}
+        continue;
+      }
+    }
+    // missed
+    if(b.y>1.1){
+      gameOver();return;
+    }
+  }
+}
+
+function drawGame(){
+  const cw=gameCanvas.width/devicePixelRatio;
+  const ch=gameCanvas.height/devicePixelRatio;
+  ctx.clearRect(0,0,cw,ch);
+
+  // balls
+  for(const b of balls){
+    ctx.beginPath();
+    ctx.arc(b.x*cw,b.y*ch,b.r*cw,0,Math.PI*2);
+    ctx.fillStyle="#ff6b6b";
+    ctx.fill();
+    ctx.closePath();
+    // highlight
+    ctx.beginPath();
+    ctx.arc(b.x*cw-b.r*cw*0.25,b.y*ch-b.r*ch*0.25,b.r*cw*0.35,0,Math.PI*2);
+    ctx.fillStyle="rgba(255,255,255,0.3)";
+    ctx.fill();
+  }
+
+  // paddle
+  const px=(paddleX-paddleW/2)*cw;
+  const py=(1-paddleH-0.02)*ch;
+  const pw=paddleW*cw;
+  const ph=paddleH*ch;
+  const grad=ctx.createLinearGradient(px,py,px+pw,py);
+  grad.addColorStop(0,"#6c5ce7");grad.addColorStop(1,"#a29bfe");
+  ctx.fillStyle=grad;
+  ctx.beginPath();
+  ctx.roundRect(px,py,pw,ph,ph/2);
+  ctx.fill();
+}
+
+function gameOver(){
+  gameRunning=false;
+  if(animId) cancelAnimationFrame(animId);
+  finalScoreEl.textContent=score;
+  gameOverOverlay.classList.add("show");
+}
+
+let lastTime=0;
+function gameLoop(ts){
+  if(!gameRunning) return;
+  const dt=lastTime?ts-lastTime:16;
+  lastTime=ts;
+  updateGame(dt);
+  drawGame();
+  animId=requestAnimationFrame(gameLoop);
+}
+
+function startGame(){
+  resetGame();
+  gameRunning=true;
+  lastTime=0;
+  detectPose();
+  animId=requestAnimationFrame(gameLoop);
+}
+
+/* ── Init sequence ── */
+async function init(){
+  loadingOverlay.classList.remove("hidden");
+  errorBox.classList.remove("show");
+  startBtn.disabled=true;restartBtn.disabled=true;
+  try{
+    await loadDeps();
+    await startCamera();
+    loadingText.textContent="正在下载 MoveNet 模型（首次约 10MB）…";
+    spinnerEl.style.display="";
+    await loadModel();
+    loadingText.textContent="✅ 准备就绪！";
+    spinnerEl.style.display="none";
+    setTimeout(()=>{loadingOverlay.classList.add("hidden");},600);
+    startBtn.disabled=false;
+  }catch(e){
+    console.error(e);
+    loadingOverlay.classList.add("hidden");
+    errorMsg.textContent=e.message||"初始化失败，请重试。";
+    errorBox.classList.add("show");
+  }
+}
+
+/* ── Events ── */
+startBtn.addEventListener("click",startGame);
+restartBtn.addEventListener("click",()=>{if(!gameRunning)startGame();});
+restartBtn2.addEventListener("click",()=>{if(!gameRunning)startGame();});
+retryBtn.addEventListener("click",init);
+
+// enable restart once model is ready
+new MutationObserver(()=>{
+  if(modelReady) restartBtn.disabled=false;
+}).observe(startBtn,{attributes:true});
+
+/* ── Kick off ── */
+init();
+
+}catch(err){
+  console.error("体感接球脚本错误:",err);
+  const lb=document.getElementById("loadingText");
+  if(lb) lb.textContent="脚本加载出错，请刷新页面重试。";
+  const sp=document.getElementById("spinnerEl");
+  if(sp) sp.style.display="none";
+}
+})();
+</script>
+</body>
+</html>

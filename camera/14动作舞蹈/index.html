@@ -1,0 +1,768 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>动作舞蹈 - MoveNet 舞蹈挑战</title>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.17.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2.1.3/dist/pose-detection.min.js"></script>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{--bg:#0a0a1a;--surface:#12122a;--neon-pink:#ff2d95;--neon-cyan:#00f0ff;--neon-green:#39ff14;--neon-gold:#ffd700;--neon-red:#ff3333;--text:#e8e8f0;--text-dim:#8888aa;--radius:16px;--font:'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif}
+html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--text);overflow-x:hidden}
+body{display:flex;flex-direction:column;align-items:center;min-height:100vh;padding:16px}
+h1{font-size:2.2rem;font-weight:800;background:linear-gradient(135deg,var(--neon-pink),var(--neon-cyan));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;letter-spacing:2px;text-align:center}
+.subtitle{font-size:.9rem;color:var(--text-dim);margin-top:4px;text-align:center}
+.hint{font-size:.8rem;color:var(--text-dim);margin-top:8px;text-align:center;max-width:500px;line-height:1.5}
+.top-bar{display:flex;justify-content:space-between;align-items:center;width:100%;max-width:900px;margin:12px 0;padding:8px 16px;background:var(--surface);border-radius:var(--radius);border:1px solid rgba(255,255,255,.06)}
+.top-bar .pose-count{font-size:.95rem;color:var(--neon-cyan)}
+.top-bar .score{font-size:.95rem;color:var(--neon-gold)}
+.game-area{display:flex;gap:16px;width:100%;max-width:900px;flex:1;min-height:0;margin-top:8px}
+.panel{flex:1;display:flex;flex-direction:column;align-items:center;background:var(--surface);border-radius:var(--radius);overflow:hidden;border:1px solid rgba(255,255,255,.06);position:relative}
+.panel-label{position:absolute;top:8px;left:12px;font-size:.75rem;color:var(--text-dim);z-index:2;background:rgba(0,0,0,.5);padding:2px 8px;border-radius:8px}
+.demo-canvas,.video-container{width:100%;height:100%;min-height:300px;position:relative}
+#demoCanvas{width:100%;height:100%;display:block}
+.video-container video{width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
+.video-container canvas{position:absolute;top:0;left:0;width:100%;height:100%;transform:scaleX(-1)}
+.feedback-bar{width:100%;max-width:900px;margin-top:12px;display:flex;flex-direction:column;align-items:center;gap:8px}
+.progress-track{width:100%;height:8px;background:rgba(255,255,255,.08);border-radius:4px;overflow:hidden}
+.progress-fill{height:100%;width:0%;border-radius:4px;background:linear-gradient(90deg,var(--neon-pink),var(--neon-cyan));transition:width .3s ease}
+.feedback-text{font-size:1.4rem;font-weight:700;min-height:2rem;text-align:center}
+.feedback-text.perfect{color:var(--neon-gold);text-shadow:0 0 20px rgba(255,215,0,.5)}
+.feedback-text.good{color:var(--neon-green);text-shadow:0 0 20px rgba(57,255,20,.5)}
+.feedback-text.try-again{color:var(--neon-red);text-shadow:0 0 20px rgba(255,51,51,.5)}
+/* Overlay screens */
+.overlay{position:fixed;inset:0;background:rgba(10,10,26,.95);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:100;gap:16px;padding:20px}
+.overlay.hidden{display:none}
+.countdown{font-size:6rem;font-weight:900;color:var(--neon-cyan);text-shadow:0 0 40px rgba(0,240,255,.6);animation:pulse .8s ease-in-out infinite}
+@keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.15)}}
+.btn{padding:12px 32px;font-size:1rem;font-weight:600;border:none;border-radius:30px;cursor:pointer;color:#fff;background:linear-gradient(135deg,var(--neon-pink),var(--neon-cyan));box-shadow:0 4px 20px rgba(255,45,149,.3);transition:transform .2s,box-shadow .2s}
+.btn:hover{transform:translateY(-2px);box-shadow:0 6px 30px rgba(255,45,149,.5)}
+.btn:active{transform:scale(.97)}
+/* Result screen */
+.result-card{background:var(--surface);border-radius:var(--radius);padding:32px;text-align:center;border:1px solid rgba(255,255,255,.1);max-width:400px;width:100%}
+.result-grade{font-size:4rem;font-weight:900;margin:12px 0}
+.result-grade.S{color:var(--neon-gold);text-shadow:0 0 30px rgba(255,215,0,.6)}
+.result-grade.A{color:var(--neon-green);text-shadow:0 0 30px rgba(57,255,20,.5)}
+.result-grade.B{color:var(--neon-cyan)}
+.result-grade.C{color:var(--neon-pink)}
+.result-score{font-size:1.8rem;color:var(--text);margin:8px 0}
+.result-detail{font-size:.85rem;color:var(--text-dim);margin-bottom:16px}
+.result-actions{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+/* Loading */
+.loading-screen{text-align:center}
+.loading-screen .spinner{width:48px;height:48px;border:4px solid rgba(255,255,255,.1);border-top-color:var(--neon-cyan);border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 16px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.loading-screen p{color:var(--text-dim);font-size:.9rem}
+/* Error */
+.error-box{background:rgba(255,51,51,.1);border:1px solid var(--neon-red);border-radius:var(--radius);padding:24px;text-align:center;max-width:400px}
+.error-box h3{color:var(--neon-red);margin-bottom:8px}
+.error-box p{color:var(--text-dim);font-size:.85rem;line-height:1.5}
+/* Particles */
+.particle{position:fixed;pointer-events:none;border-radius:50%;z-index:200}
+/* Poster */
+#posterCanvas{display:none}
+/* Mobile */
+@media(max-width:640px){
+  h1{font-size:1.6rem}
+  .game-area{flex-direction:column}
+  .panel{min-height:200px}
+  .demo-canvas,.video-container{min-height:200px}
+  .feedback-text{font-size:1.1rem}
+  .countdown{font-size:4rem}
+}
+/* prefers-reduced-motion */
+@media(prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}
+  .countdown{animation:none}
+  .particle{display:none!important}
+}
+/* Print */
+@media print{
+  body{background:#fff;color:#000}
+  .overlay,.btn,.feedback-bar,.top-bar{display:none!important}
+  .game-area{display:none}
+  h1{-webkit-text-fill-color:#000;color:#000}
+}
+</style>
+</head>
+<body>
+
+<h1>动作舞蹈</h1>
+<p class="subtitle">MoveNet 舞蹈挑战 · 实时打分</p>
+<p class="hint">跟随示范动作跳舞，摄像头会捕捉你的姿势并打分。全身入镜，保持动作清晰。</p>
+
+<div class="top-bar" id="topBar" style="visibility:hidden">
+  <span class="pose-count" id="poseCount">姿势 1 / 5</span>
+  <span class="score" id="scoreDisplay">得分：0</span>
+</div>
+
+<div class="game-area" id="gameArea" style="visibility:hidden">
+  <div class="panel">
+    <span class="panel-label">示范动作</span>
+    <div class="demo-canvas">
+      <canvas id="demoCanvas"></canvas>
+    </div>
+  </div>
+  <div class="panel">
+    <span class="panel-label">你的动作</span>
+    <div class="video-container">
+      <video id="video" autoplay playsinline muted></video>
+      <canvas id="skeletonCanvas"></canvas>
+    </div>
+  </div>
+</div>
+
+<div class="feedback-bar" id="feedbackBar" style="visibility:hidden">
+  <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+  <div class="feedback-text" id="feedbackText"></div>
+</div>
+
+<!-- Loading Overlay -->
+<div class="overlay" id="loadingOverlay">
+  <div class="loading-screen">
+    <div class="spinner"></div>
+    <p id="loadingText">正在加载模型…</p>
+  </div>
+</div>
+
+<!-- Error Overlay -->
+<div class="overlay hidden" id="errorOverlay">
+  <div class="error-box">
+    <h3>摄像头访问失败</h3>
+    <p id="errorText">请确保已授权摄像头权限，并使用 HTTPS 或 localhost 访问。</p>
+    <button class="btn" style="margin-top:16px" onclick="location.reload()">重试</button>
+  </div>
+</div>
+
+<!-- Countdown Overlay -->
+<div class="overlay hidden" id="countdownOverlay">
+  <div class="countdown" id="countdownNum">3</div>
+  <p style="color:var(--text-dim)">准备开始！</p>
+</div>
+
+<!-- Result Overlay -->
+<div class="overlay hidden" id="resultOverlay">
+  <div class="result-card">
+    <p style="font-size:.9rem;color:var(--text-dim)">挑战完成！</p>
+    <div class="result-grade" id="resultGrade">S</div>
+    <div class="result-score" id="resultScore">0 分</div>
+    <div class="result-detail" id="resultDetail"></div>
+    <div class="result-actions">
+      <button class="btn" id="shareBtn">分享海报</button>
+      <button class="btn" style="background:rgba(255,255,255,.1);box-shadow:none" onclick="location.reload()">再来一次</button>
+    </div>
+  </div>
+</div>
+
+<canvas id="posterCanvas"></canvas>
+
+<script>
+(function(){
+'use strict';
+try {
+
+// ── Pose Data (COCO 17 keypoints, normalized 0-1) ──
+// Order: nose(0), left_eye(1), right_eye(2), left_ear(3), right_ear(4),
+//        left_shoulder(5), right_shoulder(6), left_elbow(7), right_elbow(8),
+//        left_wrist(9), right_wrist(10), left_hip(11), right_hip(12),
+//        left_knee(13), right_knee(14), left_ankle(15), right_ankle(16)
+
+const poses = [
+  {
+    name: "双手举高",
+    keypoints: [
+      [0.50,0.15],[0.47,0.12],[0.53,0.12],[0.44,0.13],[0.56,0.13],
+      [0.40,0.30],[0.60,0.30],[0.35,0.15],[0.65,0.15],[0.32,0.05],[0.68,0.05],
+      [0.42,0.52],[0.58,0.52],[0.42,0.70],[0.58,0.70],[0.42,0.88],[0.58,0.88]
+    ]
+  },
+  {
+    name: "双手叉腰",
+    keypoints: [
+      [0.50,0.15],[0.47,0.12],[0.53,0.12],[0.44,0.13],[0.56,0.13],
+      [0.40,0.30],[0.60,0.30],[0.36,0.42],[0.64,0.42],[0.38,0.50],[0.62,0.50],
+      [0.42,0.52],[0.58,0.52],[0.42,0.70],[0.58,0.70],[0.42,0.88],[0.58,0.88]
+    ]
+  },
+  {
+    name: "单脚站立",
+    keypoints: [
+      [0.50,0.15],[0.47,0.12],[0.53,0.12],[0.44,0.13],[0.56,0.13],
+      [0.40,0.30],[0.60,0.30],[0.35,0.40],[0.65,0.40],[0.30,0.48],[0.70,0.48],
+      [0.42,0.52],[0.58,0.52],[0.42,0.55],[0.58,0.70],[0.42,0.58],[0.58,0.88]
+    ]
+  },
+  {
+    name: "双手合十",
+    keypoints: [
+      [0.50,0.15],[0.47,0.12],[0.53,0.12],[0.44,0.13],[0.56,0.13],
+      [0.40,0.30],[0.60,0.30],[0.45,0.35],[0.55,0.35],[0.50,0.32],[0.50,0.32],
+      [0.42,0.52],[0.58,0.52],[0.42,0.70],[0.58,0.70],[0.42,0.88],[0.58,0.88]
+    ]
+  },
+  {
+    name: "侧身伸展",
+    keypoints: [
+      [0.50,0.15],[0.47,0.12],[0.53,0.12],[0.44,0.13],[0.56,0.13],
+      [0.40,0.30],[0.60,0.30],[0.20,0.25],[0.70,0.42],[0.10,0.22],[0.78,0.45],
+      [0.42,0.52],[0.58,0.52],[0.42,0.70],[0.58,0.70],[0.42,0.88],[0.58,0.88]
+    ]
+  }
+];
+
+// ── Skeleton connections for drawing ──
+const SKELETON = [
+  [5,6],[5,7],[7,9],[6,8],[8,10],[5,11],[6,12],[11,12],[11,13],[13,15],[12,14],[14,16]
+];
+
+// ── DOM refs ──
+const video = document.getElementById('video');
+const demoCanvas = document.getElementById('demoCanvas');
+const skeletonCanvas = document.getElementById('skeletonCanvas');
+const demoCtx = demoCanvas.getContext('2d');
+const skelCtx = skeletonCanvas.getContext('2d');
+const topBar = document.getElementById('topBar');
+const gameArea = document.getElementById('gameArea');
+const feedbackBar = document.getElementById('feedbackBar');
+const poseCountEl = document.getElementById('poseCount');
+const scoreDisplayEl = document.getElementById('scoreDisplay');
+const progressFill = document.getElementById('progressFill');
+const feedbackText = document.getElementById('feedbackText');
+const loadingOverlay = document.getElementById('loadingOverlay');
+const loadingText = document.getElementById('loadingText');
+const errorOverlay = document.getElementById('errorOverlay');
+const countdownOverlay = document.getElementById('countdownOverlay');
+const countdownNum = document.getElementById('countdownNum');
+const resultOverlay = document.getElementById('resultOverlay');
+
+// ── State ──
+let detector = null;
+let currentPoseIndex = 0;
+let totalScore = 0;
+let poseScores = [];
+let poseTimer = null;
+let poseStartTime = 0;
+let animFrameId = null;
+let gameActive = false;
+const POSE_DURATION = 4000;
+const POSE_COUNT = poses.length;
+
+// ── Loading stages ──
+async function initApp() {
+  try {
+    loadingText.textContent = '正在加载模型…';
+    await tf.ready();
+
+    loadingText.textContent = '正在初始化 MoveNet…';
+    const model = poseDetection.SupportedModels.MoveNet;
+    const detectorConfig = {
+      modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING
+    };
+    detector = await poseDetection.createDetector(model, detectorConfig);
+
+    loadingText.textContent = '正在请求摄像头…';
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+      audio: false
+    });
+    video.srcObject = stream;
+    await new Promise(r => { video.onloadedmetadata = r; });
+    video.play();
+
+    resizeCanvases();
+    window.addEventListener('resize', resizeCanvases);
+
+    loadingOverlay.classList.add('hidden');
+    startCountdown();
+
+  } catch(err) {
+    console.error(err);
+    loadingOverlay.classList.add('hidden');
+    if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+      document.getElementById('errorText').textContent = '摄像头权限被拒绝。请在浏览器设置中允许摄像头访问后重试。';
+    } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+      document.getElementById('errorText').textContent = '未检测到摄像头设备。请连接摄像头后重试。';
+    } else {
+      document.getElementById('errorText').textContent = '无法访问摄像头：' + err.message;
+    }
+    errorOverlay.classList.remove('hidden');
+  }
+}
+
+function resizeCanvases() {
+  const demoRect = demoCanvas.parentElement.getBoundingClientRect();
+  demoCanvas.width = demoRect.width * devicePixelRatio;
+  demoCanvas.height = demoRect.height * devicePixelRatio;
+  demoCtx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+
+  const videoRect = skeletonCanvas.parentElement.getBoundingClientRect();
+  skeletonCanvas.width = videoRect.width * devicePixelRatio;
+  skeletonCanvas.height = videoRect.height * devicePixelRatio;
+  skelCtx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+}
+
+// ── Countdown ──
+function startCountdown() {
+  countdownOverlay.classList.remove('hidden');
+  let count = 3;
+  countdownNum.textContent = count;
+  const iv = setInterval(() => {
+    count--;
+    if (count > 0) {
+      countdownNum.textContent = count;
+    } else {
+      clearInterval(iv);
+      countdownOverlay.classList.add('hidden');
+      startGame();
+    }
+  }, 1000);
+}
+
+// ── Game Flow ──
+function startGame() {
+  topBar.style.visibility = 'visible';
+  gameArea.style.visibility = 'visible';
+  feedbackBar.style.visibility = 'visible';
+  currentPoseIndex = 0;
+  totalScore = 0;
+  poseScores = [];
+  gameActive = true;
+  updateTopBar();
+  startPose();
+  detectLoop();
+}
+
+function startPose() {
+  updateTopBar();
+  drawDemoPose(poses[currentPoseIndex]);
+  feedbackText.textContent = poses[currentPoseIndex].name;
+  feedbackText.className = 'feedback-text';
+  progressFill.style.width = '0%';
+  poseStartTime = performance.now();
+  poseTimer = setTimeout(() => finishPose(), POSE_DURATION);
+}
+
+function finishPose() {
+  if (!gameActive) return;
+  poseTimer = null;
+  currentPoseIndex++;
+  if (currentPoseIndex >= POSE_COUNT) {
+    endGame();
+  } else {
+    startPose();
+  }
+}
+
+function endGame() {
+  gameActive = false;
+  if (animFrameId) { cancelAnimationFrame(animFrameId); animFrameId = null; }
+  topBar.style.visibility = 'hidden';
+  gameArea.style.visibility = 'hidden';
+  feedbackBar.style.visibility = 'hidden';
+
+  const avg = poseScores.length ? poseScores.reduce((a,b)=>a+b,0) / poseScores.length : 0;
+  const finalScore = Math.round(avg);
+  let grade = 'C';
+  if (finalScore >= 90) grade = 'S';
+  else if (finalScore >= 75) grade = 'A';
+  else if (finalScore >= 60) grade = 'B';
+
+  document.getElementById('resultGrade').textContent = grade;
+  document.getElementById('resultGrade').className = 'result-grade ' + grade;
+  document.getElementById('resultScore').textContent = finalScore + ' 分';
+  document.getElementById('resultDetail').textContent =
+    '共 ' + POSE_COUNT + ' 个姿势 · ' + new Date().toLocaleTimeString();
+  resultOverlay.classList.remove('hidden');
+
+  document.getElementById('shareBtn').onclick = () => generatePoster(finalScore, grade);
+}
+
+function updateTopBar() {
+  poseCountEl.textContent = '姿势 ' + (currentPoseIndex + 1) + ' / ' + POSE_COUNT;
+  scoreDisplayEl.textContent = '得分：' + Math.round(totalScore);
+}
+
+// ── Draw Demo Pose ──
+function drawDemoPose(pose) {
+  const w = demoCanvas.width / devicePixelRatio;
+  const h = demoCanvas.height / devicePixelRatio;
+  demoCtx.clearRect(0, 0, w, h);
+
+  // Background gradient
+  const grad = demoCtx.createLinearGradient(0, 0, 0, h);
+  grad.addColorStop(0, 'rgba(0,240,255,0.03)');
+  grad.addColorStop(1, 'rgba(255,45,149,0.03)');
+  demoCtx.fillStyle = grad;
+  demoCtx.fillRect(0, 0, w, h);
+
+  const kps = pose.keypoints;
+  const padding = 30;
+  const drawW = w - padding * 2;
+  const drawH = h - padding * 2;
+
+  function toScreen(kp) {
+    return [padding + kp[0] * drawW, padding + kp[1] * drawH];
+  }
+
+  // Draw skeleton lines
+  demoCtx.strokeStyle = 'rgba(0,240,255,0.6)';
+  demoCtx.lineWidth = 3;
+  demoCtx.lineCap = 'round';
+  for (const [a, b] of SKELETON) {
+    const [x1, y1] = toScreen(kps[a]);
+    const [x2, y2] = toScreen(kps[b]);
+    demoCtx.beginPath();
+    demoCtx.moveTo(x1, y1);
+    demoCtx.lineTo(x2, y2);
+    demoCtx.stroke();
+  }
+
+  // Draw body silhouette (filled torso)
+  demoCtx.fillStyle = 'rgba(255,255,255,0.05)';
+  const torso = [5, 6, 12, 11];
+  demoCtx.beginPath();
+  torso.forEach((idx, i) => {
+    const [x, y] = toScreen(kps[idx]);
+    i === 0 ? demoCtx.moveTo(x, y) : demoCtx.lineTo(x, y);
+  });
+  demoCtx.closePath();
+  demoCtx.fill();
+
+  // Draw joints
+  for (let i = 0; i < kps.length; i++) {
+    const [x, y] = toScreen(kps[i]);
+    demoCtx.beginPath();
+    demoCtx.arc(x, y, 5, 0, Math.PI * 2);
+    demoCtx.fillStyle = '#00f0ff';
+    demoCtx.fill();
+    demoCtx.strokeStyle = 'rgba(0,240,255,0.3)';
+    demoCtx.lineWidth = 2;
+    demoCtx.stroke();
+  }
+
+  // Pose name
+  demoCtx.fillStyle = 'rgba(255,255,255,0.7)';
+  demoCtx.font = '600 14px ' + getComputedStyle(document.body).fontFamily;
+  demoCtx.textAlign = 'center';
+  demoCtx.fillText(pose.name, w / 2, h - 12);
+}
+
+// ── Detection Loop ──
+async function detectLoop() {
+  if (!gameActive) return;
+  try {
+    const poses_detected = await detector.estimatePoses(video);
+    if (poses_detected.length > 0 && gameActive) {
+      const kps = poses_detected[0].keypoints;
+      drawSkeleton(kps);
+      calculateSimilarity(kps);
+    }
+  } catch(e) {
+    console.warn('Detection error:', e);
+  }
+  animFrameId = requestAnimationFrame(detectLoop);
+}
+
+// ── Draw User Skeleton ──
+function drawSkeleton(keypoints) {
+  const w = skeletonCanvas.width / devicePixelRatio;
+  const h = skeletonCanvas.height / devicePixelRatio;
+  skelCtx.clearRect(0, 0, w, h);
+
+  const validKps = keypoints.filter(kp => kp.score > 0.3);
+  if (validKps.length < 3) return;
+
+  // Get bounding box for normalization
+  let minX = 1, maxX = 0, minY = 1, maxY = 0;
+  for (const kp of keypoints) {
+    if (kp.score > 0.3) {
+      minX = Math.min(minX, kp.x);
+      maxX = Math.max(maxX, kp.x);
+      minY = Math.min(minY, kp.y);
+      maxY = Math.max(maxY, kp.y);
+    }
+  }
+  const bw = maxX - minX || 1;
+  const bh = maxY - minY || 1;
+  const padding = 20;
+  const drawW = w - padding * 2;
+  const drawH = h - padding * 2;
+  const scale = Math.min(drawW / bw, drawH / bh);
+  const offsetX = padding + (drawW - bw * scale) / 2;
+  const offsetY = padding + (drawH - bh * scale) / 2;
+
+  function toScreen(kp) {
+    return [offsetX + (kp.x - minX) * scale, offsetY + (kp.y - minY) * scale];
+  }
+
+  // Lines
+  skelCtx.strokeStyle = 'rgba(57,255,20,0.7)';
+  skelCtx.lineWidth = 3;
+  skelCtx.lineCap = 'round';
+  for (const [a, b] of SKELETON) {
+    if (keypoints[a].score > 0.3 && keypoints[b].score > 0.3) {
+      const [x1, y1] = toScreen(keypoints[a]);
+      const [x2, y2] = toScreen(keypoints[b]);
+      skelCtx.beginPath();
+      skelCtx.moveTo(x1, y1);
+      skelCtx.lineTo(x2, y2);
+      skelCtx.stroke();
+    }
+  }
+
+  // Joints
+  for (const kp of keypoints) {
+    if (kp.score > 0.3) {
+      const [x, y] = toScreen(kp);
+      skelCtx.beginPath();
+      skelCtx.arc(x, y, 4, 0, Math.PI * 2);
+      skelCtx.fillStyle = '#39ff14';
+      skelCtx.fill();
+    }
+  }
+}
+
+// ── Similarity Calculation ──
+function calculateSimilarity(userKeypoints) {
+  if (!gameActive || poseTimer === null) return;
+
+  const demoKps = poses[currentPoseIndex].keypoints;
+
+  // Normalize user keypoints to 0-1 range
+  let minX = 1, maxX = 0, minY = 1, maxY = 0;
+  for (const kp of userKeypoints) {
+    if (kp.score > 0.3) {
+      minX = Math.min(minX, kp.x / video.videoWidth);
+      maxX = Math.max(maxX, kp.x / video.videoWidth);
+      minY = Math.min(minY, kp.y / video.videoHeight);
+      maxY = Math.max(maxY, kp.y / video.videoHeight);
+    }
+  }
+
+  const bodyWidth = maxX - minX || 0.3;
+  const bodyHeight = maxY - minY || 0.5;
+  const normScale = Math.max(bodyWidth, bodyHeight);
+  const centerX = (minX + maxX) / 2;
+  const centerY = (minY + maxY) / 2;
+
+  // Compute normalized user keypoints relative to body center
+  const userNorm = [];
+  for (const kp of userKeypoints) {
+    const nx = (kp.x / video.videoWidth - centerX) / normScale + 0.5;
+    const ny = (kp.y / video.videoHeight - centerY) / normScale + 0.5;
+    userNorm.push([nx, ny, kp.score]);
+  }
+
+  // Demo keypoints normalized by shoulder width
+  const shoulderDist = Math.hypot(
+    demoKps[6][0] - demoKps[5][0],
+    demoKps[6][1] - demoKps[5][1]
+  ) || 0.2;
+
+  const demoCenterX = (demoKps[5][0] + demoKps[6][0]) / 2;
+  const demoCenterY = (demoKps[5][1] + demoKps[6][1]) / 2;
+  const demoNorm = demoKps.map(kp => [
+    (kp[0] - demoCenterX) / shoulderDist + 0.5,
+    (kp[1] - demoCenterY) / shoulderDist + 0.5
+  ]);
+
+  // Weighted keypoint importance
+  const weights = [
+    0.5, 0.3, 0.3, 0.2, 0.2, // head
+    1.0, 1.0, 0.8, 0.8, 0.9, 0.9, // arms
+    0.9, 0.9, 0.7, 0.7, 0.6, 0.6  // legs
+  ];
+
+  let totalWeight = 0;
+  let totalDiff = 0;
+
+  for (let i = 0; i < 17; i++) {
+    if (userNorm[i][2] < 0.3) continue; // skip low confidence
+    const dx = userNorm[i][0] - demoNorm[i][0];
+    const dy = userNorm[i][1] - demoNorm[i][1];
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    const score = Math.max(0, 1 - dist * 2);
+    totalDiff += score * weights[i];
+    totalWeight += weights[i];
+  }
+
+  const similarity = totalWeight > 0 ? (totalDiff / totalWeight) * 100 : 0;
+
+  // Update UI
+  progressFill.style.width = similarity + '%';
+
+  if (similarity >= 85) {
+    feedbackText.textContent = '完美！';
+    feedbackText.className = 'feedback-text perfect';
+    spawnParticles('#ffd700', 3);
+  } else if (similarity >= 65) {
+    feedbackText.textContent = '不错！';
+    feedbackText.className = 'feedback-text good';
+    spawnParticles('#39ff14', 2);
+  } else {
+    feedbackText.textContent = '再试一次';
+    feedbackText.className = 'feedback-text try-again';
+  }
+
+  // Accumulate score over time
+  const elapsed = performance.now() - poseStartTime;
+  if (elapsed > 0 && elapsed <= POSE_DURATION) {
+    const dt = 16 / POSE_DURATION; // ~1 frame
+    totalScore += similarity * dt;
+    updateTopBar();
+  }
+
+  // Record final score for this pose when time is almost up
+  const remaining = POSE_DURATION - elapsed;
+  if (remaining < 100 && remaining > 0 && !poses[currentPoseIndex]._scored) {
+    poseScores.push(similarity);
+    poses[currentPoseIndex]._scored = true;
+  }
+}
+
+// ── Particles ──
+function spawnParticles(color, count) {
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  for (let i = 0; i < count; i++) {
+    const el = document.createElement('div');
+    el.className = 'particle';
+    const size = 4 + Math.random() * 6;
+    el.style.width = size + 'px';
+    el.style.height = size + 'px';
+    el.style.background = color;
+    el.style.boxShadow = '0 0 ' + (size * 2) + 'px ' + color;
+    el.style.left = (30 + Math.random() * 40) + 'vw';
+    el.style.top = (40 + Math.random() * 20) + 'vh';
+    document.body.appendChild(el);
+
+    const angle = Math.random() * Math.PI * 2;
+    const velocity = 50 + Math.random() * 80;
+    const vx = Math.cos(angle) * velocity;
+    const vy = Math.sin(angle) * velocity - 60;
+    let x = parseFloat(el.style.left);
+    let y = parseFloat(el.style.top);
+    let opacity = 1;
+    const start = performance.now();
+
+    function animate(t) {
+      const dt = (t - start) / 1000;
+      el.style.transform = `translate(${vx * dt}px, ${vy * dt + 200 * dt * dt}px)`;
+      opacity = Math.max(0, 1 - dt / 1.2);
+      el.style.opacity = opacity;
+      if (opacity > 0) requestAnimationFrame(animate);
+      else el.remove();
+    }
+    requestAnimationFrame(animate);
+  }
+}
+
+// ── Share Poster ──
+function generatePoster(score, grade) {
+  const canvas = document.getElementById('posterCanvas');
+  const ctx = canvas.getContext('2d');
+  canvas.width = 600;
+  canvas.height = 800;
+
+  // Background
+  const grad = ctx.createLinearGradient(0, 0, 600, 800);
+  grad.addColorStop(0, '#0a0a1a');
+  grad.addColorStop(0.5, '#12122a');
+  grad.addColorStop(1, '#1a0a2a');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 600, 800);
+
+  // Border glow
+  ctx.strokeStyle = '#00f0ff';
+  ctx.lineWidth = 3;
+  ctx.shadowColor = '#00f0ff';
+  ctx.shadowBlur = 20;
+  ctx.strokeRect(20, 20, 560, 760);
+  ctx.shadowBlur = 0;
+
+  // Title
+  ctx.fillStyle = '#ff2d95';
+  ctx.font = '800 48px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('动作舞蹈', 300, 100);
+
+  ctx.fillStyle = '#8888aa';
+  ctx.font = '400 18px sans-serif';
+  ctx.fillText('MoveNet 舞蹈挑战', 300, 135);
+
+  // Grade
+  ctx.font = '900 120px sans-serif';
+  const gradeColors = { S: '#ffd700', A: '#39ff14', B: '#00f0ff', C: '#ff2d95' };
+  ctx.fillStyle = gradeColors[grade] || '#fff';
+  ctx.shadowColor = ctx.fillStyle;
+  ctx.shadowBlur = 40;
+  ctx.fillText(grade, 300, 320);
+  ctx.shadowBlur = 0;
+
+  // Score
+  ctx.fillStyle = '#e8e8f0';
+  ctx.font = '700 56px sans-serif';
+  ctx.fillText(score + ' 分', 300, 420);
+
+  // Pose details
+  ctx.fillStyle = '#8888aa';
+  ctx.font = '400 16px sans-serif';
+  ctx.fillText('完成 ' + POSE_COUNT + ' 个姿势', 300, 480);
+
+  poseScores.forEach((s, i) => {
+    const y = 530 + i * 28;
+    ctx.fillStyle = '#8888aa';
+    ctx.textAlign = 'left';
+    ctx.font = '400 14px sans-serif';
+    ctx.fillText(poses[i].name, 120, y);
+    ctx.textAlign = 'right';
+    ctx.fillStyle = s >= 85 ? '#ffd700' : s >= 65 ? '#39ff14' : '#ff3333';
+    ctx.fillText(Math.round(s) + '%', 480, y);
+  });
+
+  // Timestamp
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#555';
+  ctx.font = '400 13px sans-serif';
+  ctx.fillText(new Date().toLocaleString(), 300, 750);
+
+  // Download
+  canvas.style.display = 'block';
+  canvas.toBlob(blob => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'dance_challenge_' + score + 'pts.png';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    canvas.style.display = 'none';
+  }, 'image/png');
+}
+
+// ── Reset pose scored flags on game start ──
+function resetPoseFlags() {
+  poses.forEach(p => { p._scored = false; });
+}
+
+// Override startGame to include reset
+const _origStartGame = startGame;
+startGame = function() {
+  resetPoseFlags();
+  _origStartGame();
+};
+
+// ── Init ──
+initApp();
+
+} catch(err) {
+  console.error('Fatal error:', err);
+  const lo = document.getElementById('loadingOverlay');
+  if (lo) {
+    lo.innerHTML = '<div class="error-box"><h3>初始化失败</h3><p>' +
+      err.message + '</p><button class="btn" style="margin-top:16px" onclick="location.reload()">重试</button></div>';
+  }
+}
+})();
+</script>
+</body>
+</html>

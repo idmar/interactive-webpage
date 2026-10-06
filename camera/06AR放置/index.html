@@ -1,0 +1,615 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
+<title>AR 文创放置</title>
+<script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+<script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js"></script>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0f0f13;--surface:#1a1a24;--surface2:#24243a;--accent:#7c5cff;--accent2:#ff6ec7;
+  --text:#e8e6f0;--text2:#9994b8;--radius:14px;--radius-sm:10px;
+  --safe-bottom:env(safe-area-inset-bottom,0px);
+}
+html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif}
+/* Loading overlay */
+#loading-overlay{
+  position:fixed;inset:0;z-index:9999;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;
+  transition:opacity .5s ease;
+}
+#loading-overlay.hidden{opacity:0;pointer-events:none}
+#loading-overlay h1{font-size:1.6rem;font-weight:700;margin-bottom:.4rem;background:linear-gradient(135deg,var(--accent),var(--accent2));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+#loading-overlay p{font-size:.85rem;color:var(--text2);margin-bottom:1.5rem}
+.loader-steps{list-style:none;width:240px}
+.loader-steps li{display:flex;align-items:center;gap:.6rem;padding:.5rem 0;font-size:.82rem;color:var(--text2);transition:color .3s}
+.loader-steps li.active{color:var(--text)}
+.loader-steps li.done{color:#4ade80}
+.step-dot{width:10px;height:10px;border-radius:50%;background:var(--surface2);flex-shrink:0;transition:background .3s}
+.loader-steps li.active .step-dot{background:var(--accent);box-shadow:0 0 8px var(--accent)}
+.loader-steps li.done .step-dot{background:#4ade80}
+/* Error overlay */
+#error-overlay{
+  position:fixed;inset:0;z-index:10000;background:var(--bg);display:none;flex-direction:column;align-items:center;justify-content:center;padding:2rem;text-align:center;
+}
+#error-overlay.show{display:flex}
+#error-overlay h2{font-size:1.3rem;margin-bottom:.6rem}
+#error-overlay p{font-size:.85rem;color:var(--text2);margin-bottom:1.5rem;max-width:320px}
+#retry-btn{
+  background:var(--accent);color:#fff;border:none;padding:.7rem 1.8rem;border-radius:var(--radius-sm);font-size:.9rem;cursor:pointer;
+  transition:transform .15s,box-shadow .15s;
+}
+#retry-btn:active{transform:scale(.96)}
+/* Header */
+#header{
+  position:fixed;top:0;left:0;right:0;z-index:100;padding:1rem 1.2rem .6rem;
+  background:linear-gradient(180deg,rgba(15,15,19,.92) 60%,transparent);pointer-events:none;
+}
+#header h1{font-size:1.15rem;font-weight:700;background:linear-gradient(135deg,var(--accent),var(--accent2));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+#header .sub{font-size:.7rem;color:var(--text2);margin-top:.15rem}
+/* Hint */
+#hint{
+  position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:90;
+  background:rgba(26,26,36,.88);border:1px solid rgba(124,92,255,.25);border-radius:var(--radius);
+  padding:1rem 1.4rem;max-width:280px;text-align:center;font-size:.78rem;color:var(--text2);line-height:1.5;
+  pointer-events:none;transition:opacity .4s;
+}
+#hint.hidden{opacity:0}
+/* Controls */
+#controls{
+  position:fixed;bottom:0;left:0;right:0;z-index:100;
+  padding:.8rem 1rem calc(.8rem + var(--safe-bottom));
+  background:linear-gradient(0deg,rgba(15,15,19,.94) 70%,transparent);
+  display:flex;gap:.6rem;justify-content:center;flex-wrap:wrap;
+}
+.ctrl-btn{
+  background:var(--surface2);color:var(--text);border:1px solid rgba(255,255,255,.08);
+  padding:.55rem 1rem;border-radius:var(--radius-sm);font-size:.75rem;cursor:pointer;
+  transition:background .2s,transform .12s;white-space:nowrap;
+}
+.ctrl-btn:active{transform:scale(.95);background:var(--accent)}
+.ctrl-btn.on{background:var(--accent);border-color:var(--accent)}
+/* Info panel */
+#info-panel{
+  position:fixed;top:auto;bottom:0;left:0;right:0;z-index:80;
+  max-height:60vh;overflow-y:auto;
+  background:var(--surface);border-radius:var(--radius) var(--radius) 0 0;
+  padding:1rem 1.2rem calc(1rem + var(--safe-bottom));
+  transform:translateY(100%);transition:transform .35s ease;
+}
+#info-panel.open{transform:translateY(0)}
+#info-panel h3{font-size:.9rem;margin-bottom:.6rem}
+#info-panel ol{font-size:.78rem;color:var(--text2);line-height:1.7;padding-left:1.2rem}
+#info-panel .marker-preview{width:120px;height:120px;margin:.8rem auto;display:block;border:1px solid var(--surface2);border-radius:var(--radius-sm)}
+#info-toggle{
+  position:fixed;bottom:calc(60px + var(--safe-bottom));right:1rem;z-index:101;
+  background:var(--surface2);color:var(--text2);border:1px solid rgba(255,255,255,.08);
+  width:36px;height:36px;border-radius:50%;font-size:1rem;cursor:pointer;display:flex;align-items:center;justify-content:center;
+  transition:background .2s;
+}
+#info-toggle:active{background:var(--accent)}
+/* A-Frame scene */
+a-scene{width:100%;height:100%}
+/* Reduced motion */
+@media(prefers-reduced-motion:reduce){
+  *{animation-duration:0s!important;transition-duration:0s!important}
+}
+/* Print */
+@media print{
+  body{background:#fff;color:#000}
+  #loading-overlay,#error-overlay,#header,#hint,#controls,#info-panel,#info-toggle{display:none!important}
+  a-scene{display:none!important}
+  .print-marker{display:block!important;width:200px;height:200px;margin:2rem auto}
+}
+.print-marker{display:none}
+</style>
+</head>
+<body>
+
+<!-- Loading overlay -->
+<div id="loading-overlay">
+  <h1>AR 文创放置</h1>
+  <p>Marker 识别 · 虚拟模型叠加现实</p>
+  <ul class="loader-steps" id="loader-steps">
+    <li id="step-cam"><span class="step-dot"></span>请求摄像头权限</li>
+    <li id="step-arjs"><span class="step-dot"></span>下载 AR.js</li>
+    <li id="step-aframe"><span class="step-dot"></span>加载 A-Frame 场景</li>
+    <li id="step-ready"><span class="step-dot"></span>准备就绪</li>
+  </ul>
+</div>
+
+<!-- Error overlay -->
+<div id="error-overlay">
+  <h2>📷 摄像头访问失败</h2>
+  <p>请确保已授权摄像头权限，并使用的是 HTTPS 环境或 localhost。</p>
+  <button id="retry-btn" onclick="location.reload()">重试</button>
+</div>
+
+<!-- Header -->
+<div id="header">
+  <h1>AR 文创放置</h1>
+  <div class="sub">Marker 识别 · 虚拟模型叠加现实</div>
+</div>
+
+<!-- Hint -->
+<div id="hint">将摄像头对准打印的 hiro marker，虚拟文创模型会出现在上面，移动 marker 观察。</div>
+
+<!-- A-Frame AR Scene -->
+<a-scene
+  id="ar-scene"
+  embedded
+  arjs="sourceType:webcam;debugUI:false;trackingMethod:best;"
+  renderer="antialias:true;alpha:true"
+  vr-mode-ui="enabled:false"
+  gesture-detector
+  style="position:fixed;top:0;left:0;width:100%;height:100%"
+>
+  <a-assets>
+  </a-assets>
+
+  <a-marker preset="hiro" id="hiro-marker">
+    <!-- Model group -->
+    <a-entity id="model-root" position="0 0 0">
+      <!-- Will be populated by JS -->
+    </a-entity>
+  </a-marker>
+
+  <a-entity camera></a-entity>
+</a-scene>
+
+<!-- Controls -->
+<div id="controls">
+  <button class="ctrl-btn" id="btn-switch" aria-label="切换模型">🔄 切换模型</button>
+  <button class="ctrl-btn on" id="btn-rotate" aria-label="旋转开关">⏸ 暂停旋转</button>
+  <button class="ctrl-btn" id="btn-reset" aria-label="重置位置">🎯 重置位置</button>
+</div>
+
+<!-- Info toggle -->
+<button id="info-toggle" aria-label="使用说明">?</button>
+
+<!-- Info panel -->
+<div id="info-panel">
+  <h3>📖 使用说明</h3>
+  <ol>
+    <li>打印下方 hiro marker 图案（A4纸）</li>
+    <li>打开页面并允许摄像头权限</li>
+    <li>将 marker 对准镜头</li>
+    <li>3D 文创模型会出现在 marker 上</li>
+    <li>移动 marker 观察不同角度</li>
+    <li>点击「切换模型」更换造型</li>
+    <li>保持设备稳定以获得最佳追踪效果</li>
+  </ol>
+  <!-- Hiro marker SVG inline -->
+  <svg class="marker-preview" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+    <rect width="100" height="100" fill="#fff"/>
+    <rect x="5" y="5" width="90" height="90" fill="none" stroke="#000" stroke-width="2"/>
+    <rect x="5" y="5" width="50" height="50" fill="#000"/>
+    <rect x="45" y="45" width="50" height="50" fill="#000"/>
+    <rect x="15" y="15" width="10" height="10" fill="#fff"/>
+    <rect x="30" y="15" width="10" height="10" fill="#fff"/>
+    <rect x="15" y="30" width="10" height="10" fill="#fff"/>
+    <rect x="55" y="55" width="10" height="10" fill="#fff"/>
+    <rect x="70" y="55" width="10" height="10" fill="#fff"/>
+    <rect x="55" y="70" width="10" height="10" fill="#fff"/>
+    <rect x="70" y="70" width="10" height="10" fill="#fff"/>
+    <rect x="20" y="60" width="5" height="5" fill="#000"/>
+    <rect x="30" y="65" width="5" height="5" fill="#000"/>
+    <rect x="60" y="20" width="5" height="5" fill="#000"/>
+    <rect x="70" y="30" width="5" height="5" fill="#000"/>
+  </svg>
+  <p style="font-size:.7rem;color:var(--text2);text-align:center;margin-top:.4rem">
+    简化 hiro 图案示意 · 完整图案请访问 
+    <a href="https://jeromeetienne.github.io/AR.js/data/images/HIRO.html" target="_blank" style="color:var(--accent)">官方 marker 页面</a>
+  </p>
+</div>
+
+<!-- Print-only marker -->
+<img class="print-marker" src="https://jeromeetienne.github.io/AR.js/data/images/HIRO.html" alt="Hiro Marker"/>
+
+<script>
+(function(){
+  'use strict';
+  try {
+
+  /* ── State ── */
+  var state = {
+    modelIndex: 0,
+    rotating: true,
+    hintVisible: true,
+    markerFound: false,
+    reducedMotion: window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  };
+
+  /* ── Loading steps ── */
+  var steps = {
+    cam: document.getElementById('step-cam'),
+    arjs: document.getElementById('step-arjs'),
+    aframe: document.getElementById('step-aframe'),
+    ready: document.getElementById('step-ready')
+  };
+  var overlay = document.getElementById('loading-overlay');
+  var errorOverlay = document.getElementById('error-overlay');
+
+  function setStep(key, status) {
+    if (!steps[key]) return;
+    steps[key].className = status;
+  }
+
+  /* ── Model definitions ── */
+  var models = [
+    // Model 0: 小房子
+    {
+      name: '小房子',
+      build: function(root) {
+        // Base
+        var base = document.createElement('a-box');
+        base.setAttribute('position', '0 0.25 0');
+        base.setAttribute('width', '1');
+        base.setAttribute('height', '0.5');
+        base.setAttribute('depth', '1');
+        base.setAttribute('color', '#e8d5b7');
+        base.setAttribute('material', 'shader:standard');
+        root.appendChild(base);
+
+        // Roof
+        var roof = document.createElement('a-cone');
+        roof.setAttribute('position', '0 0.7 0');
+        roof.setAttribute('radius-bottom', '0.75');
+        roof.setAttribute('height', '0.5');
+        roof.setAttribute('color', '#c0392b');
+        roof.setAttribute('segments-radial', '4');
+        roof.setAttribute('rotation', '0 45 0');
+        root.appendChild(roof);
+
+        // Door
+        var door = document.createElement('a-box');
+        door.setAttribute('position', '0 0.15 0.51');
+        door.setAttribute('width', '0.2');
+        door.setAttribute('height', '0.3');
+        door.setAttribute('depth', '0.02');
+        door.setAttribute('color', '#5d4037');
+        root.appendChild(door);
+
+        // Window
+        var win = document.createElement('a-box');
+        win.setAttribute('position', '0.3 0.35 0.51');
+        win.setAttribute('width', '0.15');
+        win.setAttribute('height', '0.15');
+        win.setAttribute('depth', '0.02');
+        win.setAttribute('color', '#81d4fa');
+        root.appendChild(win);
+
+        // Chimney
+        var chimney = document.createElement('a-cylinder');
+        chimney.setAttribute('position', '0.3 0.85 -0.1');
+        chimney.setAttribute('radius', '0.06');
+        chimney.setAttribute('height', '0.25');
+        chimney.setAttribute('color', '#795548');
+        root.appendChild(chimney);
+      }
+    },
+    // Model 1: 风车
+    {
+      name: '风车',
+      build: function(root) {
+        // Tower
+        var tower = document.createElement('a-cylinder');
+        tower.setAttribute('position', '0 0.35 0');
+        tower.setAttribute('radius', '0.15');
+        tower.setAttribute('height', '0.7');
+        tower.setAttribute('color', '#f5f5dc');
+        root.appendChild(tower);
+
+        // Cap
+        var cap = document.createElement('a-cone');
+        cap.setAttribute('position', '0 0.75 0');
+        cap.setAttribute('radius-bottom', '0.2');
+        cap.setAttribute('height', '0.2');
+        cap.setAttribute('color', '#2e7d32');
+        root.appendChild(cap);
+
+        // Blades hub
+        var hub = document.createElement('a-sphere');
+        hub.setAttribute('position', '0 0.55 0.16');
+        hub.setAttribute('radius', '0.04');
+        hub.setAttribute('color', '#555');
+        root.appendChild(hub);
+
+        // 4 blades
+        for (var i = 0; i < 4; i++) {
+          var blade = document.createElement('a-box');
+          var angle = i * 90;
+          blade.setAttribute('position', '0 0.55 0.18');
+          blade.setAttribute('width', '0.06');
+          blade.setAttribute('height', '0.4');
+          blade.setAttribute('depth', '0.01');
+          blade.setAttribute('color', '#e0e0e0');
+          blade.setAttribute('rotation', '0 0 ' + angle);
+          blade.classList.add('blade');
+          root.appendChild(blade);
+        }
+
+        // Base
+        var base = document.createElement('a-cylinder');
+        base.setAttribute('position', '0 0.02 0');
+        base.setAttribute('radius', '0.25');
+        base.setAttribute('height', '0.04');
+        base.setAttribute('color', '#8d6e63');
+        root.appendChild(base);
+      }
+    },
+    // Model 2: 卡通公仔
+    {
+      name: '卡通公仔',
+      build: function(root) {
+        // Body
+        var body = document.createElement('a-sphere');
+        body.setAttribute('position', '0 0.3 0');
+        body.setAttribute('radius', '0.25');
+        body.setAttribute('color', '#ff8a65');
+        root.appendChild(body);
+
+        // Head
+        var head = document.createElement('a-sphere');
+        head.setAttribute('position', '0 0.65 0');
+        head.setAttribute('radius', '0.2');
+        head.setAttribute('color', '#ffcc80');
+        root.appendChild(head);
+
+        // Eyes
+        var eyeL = document.createElement('a-sphere');
+        eyeL.setAttribute('position', '-0.07 0.68 0.17');
+        eyeL.setAttribute('radius', '0.035');
+        eyeL.setAttribute('color', '#222');
+        root.appendChild(eyeL);
+
+        var eyeR = document.createElement('a-sphere');
+        eyeR.setAttribute('position', '0.07 0.68 0.17');
+        eyeR.setAttribute('radius', '0.035');
+        eyeR.setAttribute('color', '#222');
+        root.appendChild(eyeR);
+
+        // Smile (torus)
+        var smile = document.createElement('a-torus');
+        smile.setAttribute('position', '0 0.6 0.17');
+        smile.setAttribute('radius', '0.06');
+        smile.setAttribute('radius-tubular', '0.01');
+        smile.setAttribute('arc', '180');
+        smile.setAttribute('color', '#c62828');
+        smile.setAttribute('rotation', '180 0 0');
+        root.appendChild(smile);
+
+        // Hat
+        var hat = document.createElement('a-cylinder');
+        hat.setAttribute('position', '0 0.85 0');
+        hat.setAttribute('radius', '0.15');
+        hat.setAttribute('height', '0.12');
+        hat.setAttribute('color', '#7c5cff');
+        root.appendChild(hat);
+
+        // Hat brim
+        var brim = document.createElement('a-cylinder');
+        brim.setAttribute('position', '0 0.8 0');
+        brim.setAttribute('radius', '0.22');
+        brim.setAttribute('height', '0.02');
+        brim.setAttribute('color', '#5c3dbf');
+        root.appendChild(brim);
+
+        // Feet
+        var footL = document.createElement('a-sphere');
+        footL.setAttribute('position', '-0.12 0.06 0.05');
+        footL.setAttribute('radius', '0.08');
+        footL.setAttribute('color', '#ff8a65');
+        root.appendChild(footL);
+
+        var footR = document.createElement('a-sphere');
+        footR.setAttribute('position', '0.12 0.06 0.05');
+        footR.setAttribute('radius', '0.08');
+        footR.setAttribute('color', '#ff8a65');
+        root.appendChild(footR);
+      }
+    }
+  ];
+
+  /* ── DOM refs ── */
+  var modelRoot = document.getElementById('model-root');
+  var btnSwitch = document.getElementById('btn-switch');
+  var btnRotate = document.getElementById('btn-rotate');
+  var btnReset = document.getElementById('btn-reset');
+  var hint = document.getElementById('hint');
+  var infoToggle = document.getElementById('info-toggle');
+  var infoPanel = document.getElementById('info-panel');
+  var scene = document.getElementById('ar-scene');
+  var marker = document.getElementById('hiro-marker');
+
+  /* ── Build model ── */
+  function buildModel(index) {
+    // Clear
+    while (modelRoot.firstChild) {
+      modelRoot.removeChild(modelRoot.firstChild);
+    }
+    models[index].build(modelRoot);
+  }
+
+  /* ── Rotation animation ── */
+  var rotationAngle = 0;
+  var lastTime = 0;
+
+  function animateRotation(timestamp) {
+    if (!state.rotating || state.reducedMotion) {
+      lastTime = timestamp;
+      requestAnimationFrame(animateRotation);
+      return;
+    }
+    var delta = timestamp - lastTime;
+    lastTime = timestamp;
+    if (delta > 0 && delta < 200) {
+      rotationAngle += (delta * 0.03); // ~18deg/s
+      if (rotationAngle >= 360) rotationAngle -= 360;
+      modelRoot.setAttribute('rotation', '0 ' + rotationAngle + ' 0');
+    }
+    requestAnimationFrame(animateRotation);
+  }
+
+  /* ── Marker events ── */
+  marker.addEventListener('markerFound', function() {
+    state.markerFound = true;
+    if (state.hintVisible) {
+      hint.classList.add('hidden');
+      state.hintVisible = false;
+    }
+  });
+
+  marker.addEventListener('markerLost', function() {
+    state.markerFound = false;
+  });
+
+  /* ── Button handlers ── */
+  btnSwitch.addEventListener('click', function() {
+    state.modelIndex = (state.modelIndex + 1) % models.length;
+    buildModel(state.modelIndex);
+    rotationAngle = 0;
+    // Brief flash
+    btnSwitch.classList.add('on');
+    setTimeout(function(){ btnSwitch.classList.remove('on'); }, 200);
+  });
+
+  btnRotate.addEventListener('click', function() {
+    state.rotating = !state.rotating;
+    if (state.rotating) {
+      btnRotate.textContent = '⏸ 暂停旋转';
+      btnRotate.classList.add('on');
+    } else {
+      btnRotate.textContent = '▶ 开始旋转';
+      btnRotate.classList.remove('on');
+    }
+  });
+
+  btnReset.addEventListener('click', function() {
+    modelRoot.setAttribute('position', '0 0 0');
+    modelRoot.setAttribute('rotation', '0 0 0');
+    rotationAngle = 0;
+  });
+
+  /* ── Info panel toggle ── */
+  infoToggle.addEventListener('click', function() {
+    infoPanel.classList.toggle('open');
+  });
+
+  /* ── Tap on screen to switch (when not tapping buttons) ── */
+  scene.addEventListener('click', function(e) {
+    if (e.target === scene || e.target.tagName === 'CANVAS') {
+      state.modelIndex = (state.modelIndex + 1) % models.length;
+      buildModel(state.modelIndex);
+      rotationAngle = 0;
+    }
+  });
+
+  /* ── Loading sequence ── */
+  function startLoading() {
+    // Step 1: Camera
+    setStep('step-cam', 'active');
+
+    // Check if AR.js loaded
+    if (typeof ARjs === 'undefined') {
+      setStep('step-cam', 'done');
+      setStep('step-arjs', 'active');
+      // Wait for AR.js
+      var arjsCheck = setInterval(function() {
+        if (typeof ARjs !== 'undefined') {
+          clearInterval(arjsCheck);
+          setStep('step-arjs', 'done');
+          proceedToScene();
+        }
+      }, 300);
+      // Timeout after 15s
+      setTimeout(function() {
+        clearInterval(arjsCheck);
+        if (typeof ARjs === 'undefined') {
+          setStep('step-arjs', 'active');
+          // Continue anyway, scene might work
+          proceedToScene();
+        }
+      }, 15000);
+    } else {
+      setStep('step-cam', 'done');
+      setStep('step-arjs', 'done');
+      proceedToScene();
+    }
+  }
+
+  function proceedToScene() {
+    setStep('step-aframe', 'active');
+
+    // Build initial model
+    buildModel(0);
+
+    // Wait for scene loaded
+    scene.addEventListener('loaded', function() {
+      setStep('step-aframe', 'done');
+      setStep('step-ready', 'done');
+      // Start animation loop
+      lastTime = performance.now();
+      requestAnimationFrame(animateRotation);
+
+      // Hide overlay
+      setTimeout(function() {
+        overlay.classList.add('hidden');
+        setTimeout(function() { overlay.style.display = 'none'; }, 500);
+      }, 600);
+    });
+
+    // Timeout fallback
+    setTimeout(function() {
+      if (!overlay.classList.contains('hidden')) {
+        setStep('step-aframe', 'done');
+        setStep('step-ready', 'done');
+        lastTime = performance.now();
+        requestAnimationFrame(animateRotation);
+        overlay.classList.add('hidden');
+        setTimeout(function() { overlay.style.display = 'none'; }, 500);
+      }
+    }, 12000);
+  }
+
+  /* ── Camera error handling ── */
+  // Try to detect camera failure
+  navigator.mediaDevices = navigator.mediaDevices || navigator.webkitGetUserMedia;
+  
+  var camPromise = navigator.mediaDevices && navigator.mediaDevices.getUserMedia
+    ? navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: 640, height: 480 } })
+    : Promise.reject(new Error('getUserMedia not supported'));
+
+  camPromise.then(function(stream) {
+    // Stop immediately - AR.js will request its own stream
+    stream.getTracks().forEach(function(t) { t.stop(); });
+    setStep('step-cam', 'done');
+    startLoading();
+  }).catch(function(err) {
+    console.error('Camera error:', err);
+    setStep('step-cam', 'done');
+    // Show error
+    overlay.style.display = 'none';
+    errorOverlay.classList.add('show');
+  });
+
+  /* ── Hide hint after 8s ── */
+  setTimeout(function() {
+    if (state.hintVisible) {
+      hint.classList.add('hidden');
+      state.hintVisible = false;
+    }
+  }, 12000);
+
+  } catch(e) {
+    console.error('AR init error:', e);
+    var ov = document.getElementById('loading-overlay');
+    if (ov) ov.style.display = 'none';
+    var eo = document.getElementById('error-overlay');
+    if (eo) eo.classList.add('show');
+  }
+})();
+</script>
+</body>
+</html>

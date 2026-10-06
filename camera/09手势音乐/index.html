@@ -1,0 +1,850 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
+<title>手势音乐</title>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1/hands.js" crossorigin="anonymous"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--neon-cyan:#00f0ff;--neon-magenta:#ff00aa;--neon-yellow:#ffe100;--neon-green:#00ff88;--bg:#08080f;--surface:#111120;--surface2:#1a1a2e;--text:#e8e8f0;--text-dim:#6a6a8a;--radius:14px}
+html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);font-family:-apple-system,'PingFang SC','Noto Sans SC','Helvetica Neue',sans-serif;-webkit-font-smoothing:antialiased}
+#app{display:flex;flex-direction:column;height:100%;height:100dvh;position:relative}
+/* Header */
+#header{flex-shrink:0;text-align:center;padding:12px 16px 4px;z-index:10;position:relative}
+#header h1{font-size:clamp(1.4rem,4vw,2rem);font-weight:800;background:linear-gradient(135deg,var(--neon-cyan),var(--neon-magenta));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;letter-spacing:0.06em;line-height:1.3}
+#header .subtitle{font-size:clamp(0.65rem,2vw,0.82rem);color:var(--text-dim);margin-top:2px;letter-spacing:0.04em}
+/* Waveform */
+#waveCanvas{flex-shrink:0;width:100%;height:54px;display:block;opacity:0.85}
+/* Main area */
+#main{flex:1;display:flex;position:relative;min-height:0;overflow:hidden}
+#videoArea{flex:1;position:relative;min-width:0}
+#video{width:100%;height:100%;object-fit:cover;transform:scaleX(-1);border-radius:var(--radius);opacity:0.35}
+#handCanvas{position:absolute;top:0;left:0;width:100%;height:100%;border-radius:var(--radius)}
+/* Spectrum */
+#spectrumCanvas{flex-shrink:0;width:120px;height:100%;display:block}
+/* Status bar */
+#statusBar{flex-shrink:0;display:flex;align-items:center;justify-content:center;gap:16px;padding:6px 16px;font-size:0.78rem;color:var(--text-dim);z-index:10}
+.status-item{display:flex;align-items:center;gap:4px}
+.status-dot{width:7px;height:7px;border-radius:50%;background:var(--neon-green);box-shadow:0 0 6px var(--neon-green);transition:background .3s,box-shadow .3s}
+.status-dot.warn{background:var(--neon-yellow);box-shadow:0 0 6px var(--neon-yellow)}
+.status-dot.off{background:#444;box-shadow:none}
+#bpmVal,#pitchVal{font-variant-numeric:tabular-nums;color:var(--neon-cyan);font-weight:600;min-width:36px;text-align:right}
+/* Gesture hint */
+#gestureHint{position:absolute;bottom:8px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.6);backdrop-filter:blur(6px);border:1px solid rgba(255,255,255,0.08);border-radius:20px;padding:4px 14px;font-size:0.72rem;color:var(--text-dim);white-space:nowrap;z-index:10;transition:opacity .3s}
+/* Controls */
+#controls{flex-shrink:0;display:flex;align-items:center;justify-content:center;gap:10px;padding:10px 16px 14px;z-index:10}
+.sound-btn{flex:1;max-width:140px;padding:10px 0;border:1.5px solid rgba(255,255,255,0.12);border-radius:var(--radius);background:var(--surface);color:var(--text-dim);font-size:0.88rem;font-weight:600;cursor:pointer;transition:all .2s;letter-spacing:0.04em;-webkit-tap-highlight-color:transparent}
+.sound-btn:hover{border-color:rgba(255,255,255,0.25);color:var(--text)}
+.sound-btn.active{border-color:var(--neon-cyan);color:var(--neon-cyan);background:rgba(0,240,255,0.08);box-shadow:0 0 16px rgba(0,240,255,0.12)}
+/* Info */
+#info{flex-shrink:0;text-align:center;padding:0 20px 10px;font-size:0.7rem;color:var(--text-dim);line-height:1.6}
+/* Loading overlay */
+#loading{position:fixed;inset:0;z-index:999;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;transition:opacity .5s}
+#loading.hidden{opacity:0;pointer-events:none}
+#loading h2{font-size:1.4rem;background:linear-gradient(135deg,var(--neon-cyan),var(--neon-magenta));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+#loading .step{font-size:0.85rem;color:var(--text-dim);transition:color .3s}
+#loading .step.done{color:var(--neon-green)}
+#loading .step.error{color:#f44}
+.spinner{width:36px;height:36px;border:3px solid rgba(255,255,255,0.1);border-top-color:var(--neon-cyan);border-radius:50%;animation:spin 0.8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+/* Error overlay */
+#errorOverlay{position:fixed;inset:0;z-index:998;background:rgba(8,8,15,0.95);display:none;flex-direction:column;align-items:center;justify-content:center;gap:14px;text-align:center;padding:24px}
+#errorOverlay.show{display:flex}
+#errorOverlay h3{font-size:1.1rem;color:var(--neon-magenta)}
+#errorOverlay p{font-size:0.85rem;color:var(--text-dim);max-width:340px;line-height:1.6}
+#retryBtn{padding:10px 28px;border:1.5px solid var(--neon-cyan);border-radius:var(--radius);background:transparent;color:var(--neon-cyan);font-size:0.9rem;cursor:pointer;transition:all .2s}
+#retryBtn:hover{background:rgba(0,240,255,0.1)}
+/* Mobile */
+@media(max-width:600px){
+  #spectrumCanvas{width:80px}
+  #header{padding:8px 12px 2px}
+  #controls{padding:6px 12px 10px;gap:6px}
+  .sound-btn{padding:8px 0;font-size:0.8rem}
+  #info{padding:0 14px 8px;font-size:0.65rem}
+  #statusBar{font-size:0.7rem;gap:10px}
+}
+@media(max-width:380px){
+  #spectrumCanvas{width:60px}
+}
+/* prefers-reduced-motion */
+@media(prefers-reduced-motion:reduce){
+  #waveCanvas,#spectrumCanvas{opacity:0.3}
+  .spinner{animation:none;border-top-color:transparent}
+  #handCanvas{opacity:0.5}
+}
+/* Print */
+@media print{
+  body{background:#fff;color:#000}
+  #app{display:block}
+  video,#handCanvas,#waveCanvas,#spectrumCanvas,#loading,#errorOverlay,#gestureHint{display:none!important}
+  #header h1{-webkit-text-fill-color:#000;color:#000}
+  .sound-btn{border-color:#999;color:#000}
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="loading">
+    <h2>手势音乐</h2>
+    <div class="spinner"></div>
+    <div class="step" id="step1">正在加载手部识别模型…</div>
+    <div class="step" id="step2">正在请求摄像头权限…</div>
+    <div class="step" id="step3">即将开始，请准备双手…</div>
+  </div>
+  <div id="errorOverlay">
+    <h3>🎵 无法启动摄像头</h3>
+    <p id="errorMsg">请确保已授权摄像头权限，并使用 HTTPS 或本地环境访问。</p>
+    <button id="retryBtn" onclick="location.reload()">重试</button>
+  </div>
+  <div id="header">
+    <h1>手势音乐</h1>
+    <p class="subtitle">手是隔空乐器 · Web Audio 实时合成</p>
+  </div>
+  <canvas id="waveCanvas"></canvas>
+  <div id="main">
+    <div id="videoArea">
+      <video id="video" playsinline muted></video>
+      <canvas id="handCanvas"></canvas>
+      <div id="gestureHint">👋 等待手部检测…</div>
+    </div>
+    <canvas id="spectrumCanvas"></canvas>
+  </div>
+  <div id="statusBar">
+    <div class="status-item"><span class="status-dot off" id="handDot"></span><span id="handStatus">未检测</span></div>
+    <div class="status-item">BPM <span id="bpmVal">--</span></div>
+    <div class="status-item">音高 <span id="pitchVal">--</span></div>
+  </div>
+  <div id="controls">
+    <button class="sound-btn" data-sound="drum">🥁 鼓点</button>
+    <button class="sound-btn active" data-sound="synth">🎹 电子音</button>
+    <button class="sound-btn" data-sound="piano">🎵 钢琴</button>
+  </div>
+  <div id="info">用手在空中演奏音乐：左右控制节奏，上下改变音调，握拳开始，张手停止。手部尽量清晰，背景不要太杂乱。</div>
+</div>
+<script>
+(function(){
+'use strict';
+try {
+
+/* ═══════════════════ CONSTANTS ═══════════════════ */
+const NOTE_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+const MIDI_MIN = 48; // C3
+const MIDI_MAX = 72; // C5
+const BPM_MIN = 60;
+const BPM_MAX = 160;
+const SMOOTH = 0.3;
+const FIST_THRESHOLD = 0.07;
+const GLOW_COLORS = ['#00f0ff','#ff00aa','#00ff88','#ffe100','#aa66ff'];
+const REDUCED_MOTION = window.matchMedia('(prefers-reduced-motion:reduce)').matches;
+
+/* ═══════════════════ DOM ═══════════════════ */
+const $ = id => document.getElementById(id);
+const videoEl = $('video');
+const handCanvas = $('handCanvas');
+const waveCanvas = $('waveCanvas');
+const specCanvas = $('spectrumCanvas');
+const loadingEl = $('loading');
+const errorEl = $('errorOverlay');
+const errorMsg = $('errorMsg');
+const gestureHint = $('gestureHint');
+const handDot = $('handDot');
+const handStatusEl = $('handStatus');
+const bpmValEl = $('bpmVal');
+const pitchValEl = $('pitchVal');
+const soundBtns = document.querySelectorAll('.sound-btn');
+const step1 = $('step1'), step2 = $('step2'), step3 = $('step3');
+
+const handCtx = handCanvas.getContext('2d');
+const waveCtx = waveCanvas.getContext('2d');
+const specCtx = specCanvas.getContext('2d');
+
+/* ═══════════════════ STATE ═══════════════════ */
+let audioCtx = null, analyser = null, masterGain = null;
+let currentSound = 'synth';
+let audioReady = false;
+let running = false;
+
+// Hand tracking state
+let leftHand = null, rightHand = null;
+let smoothBpm = 100, smoothPitch = 60;
+let prevLeftY = null, prevRightY = null;
+let pitchOffset = 0;
+
+// Gesture state
+let gestureState = 'idle'; // idle | playing | muted
+let prevGestureState = 'idle';
+
+// Beat
+let beatTimer = null;
+let currentBpm = 100;
+let currentMidi = 60;
+
+// Sustained audio nodes
+let sustainedOsc1 = null, sustainedOsc2 = null, sustainedGain = null;
+
+// Glow state
+let glowPositions = [];
+
+// Hands solution reference
+let handsSolution = null;
+
+/* ═══════════════════ UTILITIES ═══════════════════ */
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function midiToFreq(m) { return 440 * Math.pow(2, (m - 69) / 12); }
+function midiToName(m) {
+  const octave = Math.floor(m / 12) - 1;
+  return NOTE_NAMES[m % 12] + octave;
+}
+function dist(a, b) {
+  return Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2);
+}
+
+function resizeCanvas(canvas) {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const rect = canvas.getBoundingClientRect();
+  canvas.width = rect.width * dpr;
+  canvas.height = rect.height * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return { w: rect.width, h: rect.height };
+}
+
+/* ═══════════════════ AUDIO ENGINE ═══════════════════ */
+function initAudio() {
+  if (audioCtx) return;
+  try {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    masterGain = audioCtx.createGain();
+    masterGain.gain.value = 0.5;
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 512;
+    analyser.smoothingTimeConstant = 0.7;
+    masterGain.connect(analyser);
+    analyser.connect(audioCtx.destination);
+    audioReady = true;
+  } catch(e) {
+    console.warn('Audio init failed:', e);
+  }
+}
+
+function resumeAudio() {
+  if (audioCtx && audioCtx.state === 'suspended') {
+    audioCtx.resume().catch(() => {});
+  }
+}
+
+function stopSustained() {
+  if (sustainedGain) {
+    const now = audioCtx.currentTime;
+    sustainedGain.gain.cancelScheduledValues(now);
+    sustainedGain.gain.setValueAtTime(sustainedGain.gain.value, now);
+    sustainedGain.gain.linearRampToValueAtTime(0, now + 0.15);
+    const osc1 = sustainedOsc1, osc2 = sustainedOsc2, g = sustainedGain;
+    setTimeout(() => {
+      try { osc1 && osc1.stop(); } catch(e){}
+      try { osc2 && osc2.stop(); } catch(e){}
+      try { g.disconnect(); } catch(e){}
+    }, 200);
+    sustainedOsc1 = null; sustainedOsc2 = null; sustainedGain = null;
+  }
+}
+
+function startSustained(midi) {
+  if (!audioReady) return;
+  stopSustained();
+  const freq = midiToFreq(midi);
+  const now = audioCtx.currentTime;
+  sustainedGain = audioCtx.createGain();
+  sustainedGain.gain.setValueAtTime(0, now);
+  sustainedGain.gain.linearRampToValueAtTime(0.25, now + 0.08);
+  sustainedGain.connect(masterGain);
+
+  if (currentSound === 'synth') {
+    sustainedOsc1 = audioCtx.createOscillator();
+    sustainedOsc1.type = 'square';
+    sustainedOsc1.frequency.value = freq;
+    sustainedOsc2 = audioCtx.createOscillator();
+    sustainedOsc2.type = 'sawtooth';
+    sustainedOsc2.frequency.value = freq * 1.003;
+    const g1 = audioCtx.createGain(); g1.gain.value = 0.35;
+    const g2 = audioCtx.createGain(); g2.gain.value = 0.25;
+    sustainedOsc1.connect(g1); g1.connect(sustainedGain);
+    sustainedOsc2.connect(g2); g2.connect(sustainedGain);
+    sustainedOsc1.start(now); sustainedOsc2.start(now);
+  } else if (currentSound === 'piano') {
+    sustainedOsc1 = audioCtx.createOscillator();
+    sustainedOsc1.type = 'sine';
+    sustainedOsc1.frequency.value = freq;
+    const g1 = audioCtx.createGain(); g1.gain.value = 0.5;
+    sustainedOsc1.connect(g1); g1.connect(sustainedGain);
+    // harmonics
+    [2, 3, 4].forEach((h, i) => {
+      const osc = audioCtx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.value = freq * h;
+      const g = audioCtx.createGain();
+      g.gain.value = 0.12 / (i + 1);
+      osc.connect(g); g.connect(sustainedGain);
+      osc.start(now);
+      // store for cleanup
+      if (!sustainedOsc1._harmonics) sustainedOsc1._harmonics = [];
+      sustainedOsc1._harmonics.push({ osc, g });
+    });
+    sustainedOsc1.start(now);
+  } else {
+    // drum: no sustained tone, just noise texture
+    sustainedOsc1 = audioCtx.createOscillator();
+    sustainedOsc1.type = 'triangle';
+    sustainedOsc1.frequency.value = 80;
+    const g1 = audioCtx.createGain(); g1.gain.value = 0.08;
+    sustainedOsc1.connect(g1); g1.connect(sustainedGain);
+    sustainedOsc1.start(now);
+  }
+}
+
+function updateSustainedPitch(midi) {
+  if (!sustainedOsc1) return;
+  const freq = midiToFreq(midi);
+  const now = audioCtx.currentTime;
+  try {
+    sustainedOsc1.frequency.cancelScheduledValues(now);
+    sustainedOsc1.frequency.setValueAtTime(sustainedOsc1.frequency.value, now);
+    sustainedOsc1.frequency.linearRampToValueAtTime(freq, now + 0.05);
+  } catch(e){}
+  if (sustainedOsc2) {
+    try {
+      sustainedOsc2.frequency.cancelScheduledValues(now);
+      sustainedOsc2.frequency.setValueAtTime(sustainedOsc2.frequency.value, now);
+      sustainedOsc2.frequency.linearRampToValueAtTime(freq * 1.003, now + 0.05);
+    } catch(e){}
+  }
+  if (sustainedOsc1 && sustainedOsc1._harmonics) {
+    sustainedOsc1._harmonics.forEach(({ osc }, i) => {
+      try {
+        const h = [2,3,4][i];
+        osc.frequency.linearRampToValueAtTime(freq * h, now + 0.05);
+      } catch(e){}
+    });
+  }
+}
+
+/* ── Sound Synthesis ── */
+function playDrum() {
+  if (!audioReady) return;
+  const now = audioCtx.currentTime;
+  const dur = 0.12;
+  // Noise burst
+  const bufLen = Math.floor(audioCtx.sampleRate * dur);
+  const buf = audioCtx.createBuffer(1, bufLen, audioCtx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < bufLen; i++) data[i] = (Math.random() * 2 - 1);
+  const src = audioCtx.createBufferSource();
+  src.buffer = buf;
+  const filter = audioCtx.createBiquadFilter();
+  filter.type = 'lowpass';
+  filter.frequency.setValueAtTime(1200, now);
+  filter.frequency.exponentialRampToValueAtTime(80, now + dur);
+  const env = audioCtx.createGain();
+  env.gain.setValueAtTime(0.7, now);
+  env.gain.exponentialRampToValueAtTime(0.001, now + dur);
+  src.connect(filter); filter.connect(env); env.connect(masterGain);
+  src.start(now); src.stop(now + dur + 0.05);
+}
+
+function playSynthNote(midi) {
+  if (!audioReady) return;
+  const freq = midiToFreq(midi);
+  const now = audioCtx.currentTime;
+  const dur = 0.25;
+  const g = audioCtx.createGain();
+  g.gain.setValueAtTime(0, now);
+  g.gain.linearRampToValueAtTime(0.3, now + 0.02);
+  g.gain.linearRampToValueAtTime(0.15, now + dur * 0.5);
+  g.gain.linearRampToValueAtTime(0, now + dur);
+  g.connect(masterGain);
+  const o1 = audioCtx.createOscillator();
+  o1.type = 'square'; o1.frequency.value = freq;
+  const o2 = audioCtx.createOscillator();
+  o2.type = 'sawtooth'; o2.frequency.value = freq * 1.005;
+  const g1 = audioCtx.createGain(); g1.gain.value = 0.4;
+  const g2 = audioCtx.createGain(); g2.gain.value = 0.25;
+  o1.connect(g1); g1.connect(g); o2.connect(g2); g2.connect(g);
+  o1.start(now); o2.start(now); o1.stop(now + dur + 0.05); o2.stop(now + dur + 0.05);
+}
+
+function playPianoNote(midi) {
+  if (!audioReady) return;
+  const freq = midiToFreq(midi);
+  const now = audioCtx.currentTime;
+  const dur = 0.5;
+  const g = audioCtx.createGain();
+  g.gain.setValueAtTime(0, now);
+  g.gain.linearRampToValueAtTime(0.4, now + 0.01);
+  g.gain.linearRampToValueAtTime(0.2, now + 0.1);
+  g.gain.linearRampToValueAtTime(0, now + dur);
+  g.connect(masterGain);
+  // Fundamental
+  const o = audioCtx.createOscillator();
+  o.type = 'sine'; o.frequency.value = freq;
+  const og = audioCtx.createGain(); og.gain.value = 0.5;
+  o.connect(og); og.connect(g);
+  o.start(now); o.stop(now + dur + 0.05);
+  // Harmonics
+  [2, 3, 4, 5].forEach((h, i) => {
+    const ho = audioCtx.createOscillator();
+    ho.type = 'sine'; ho.frequency.value = freq * h;
+    const hg = audioCtx.createGain();
+    hg.gain.value = 0.15 / (i + 1);
+    ho.connect(hg); hg.connect(g);
+    ho.start(now); ho.stop(now + dur + 0.05);
+  });
+}
+
+function playBeatNote() {
+  if (gestureState !== 'playing') return;
+  if (currentSound === 'drum') {
+    playDrum();
+  } else if (currentSound === 'synth') {
+    playSynthNote(currentMidi);
+  } else {
+    playPianoNote(currentMidi);
+  }
+}
+
+function startBeat() {
+  stopBeat();
+  const interval = 60000 / currentBpm;
+  beatTimer = setInterval(() => {
+    if (gestureState === 'playing') playBeatNote();
+  }, interval);
+}
+
+function stopBeat() {
+  if (beatTimer) { clearInterval(beatTimer); beatTimer = null; }
+}
+
+function updateBpm(bpm) {
+  const newBpm = Math.round(bpm);
+  if (newBpm !== currentBpm) {
+    currentBpm = newBpm;
+    if (gestureState === 'playing') startBeat();
+  }
+}
+
+/* ═══════════════════ HAND TRACKING ═══════════════════ */
+function getFistScore(landmarks) {
+  const palm = landmarks[9]; // middle finger MCP
+  const tips = [4, 8, 12, 16, 20];
+  let total = 0;
+  for (const t of tips) total += dist(landmarks[t], palm);
+  return total / tips.length;
+}
+
+function processHands(results) {
+  leftHand = null; rightHand = null;
+  if (results.multiHandLandmarks && results.multiHandedness) {
+    for (let i = 0; i < results.multiHandLandmarks.length; i++) {
+      const lm = results.multiHandLandmarks[i];
+      const h = results.multiHandedness[i];
+      const label = h.label; // 'Left' or 'Right' (from person's perspective)
+      const score = getFistScore(lm);
+      const palmX = lm[9].x;
+      const palmY = lm[9].y;
+      if (label === 'Left') {
+        leftHand = { landmarks: lm, palmX, palmY, fistScore: score };
+      } else {
+        rightHand = { landmarks: lm, palmX, palmY, fistScore: score };
+      }
+    }
+  }
+}
+
+function updateGestureState() {
+  const bothOpen = leftHand && rightHand &&
+    leftHand.fistScore > FIST_THRESHOLD && rightHand.fistScore > FIST_THRESHOLD;
+  const anyFist = (leftHand && leftHand.fistScore <= FIST_THRESHOLD) ||
+                  (rightHand && rightHand.fistScore <= FIST_THRESHOLD);
+  const anyOpen = (leftHand && leftHand.fistScore > FIST_THRESHOLD) ||
+                  (rightHand && rightHand.fistScore > FIST_THRESHOLD);
+
+  if (bothOpen) {
+    gestureState = 'muted';
+  } else if (anyFist) {
+    gestureState = 'playing';
+  } else if (anyOpen && !anyFist) {
+    gestureState = 'idle';
+  } else if (!leftHand && !rightHand) {
+    gestureState = 'idle';
+  }
+}
+
+function updateControlMapping() {
+  // Left hand X → BPM
+  if (leftHand) {
+    const targetBpm = BPM_MIN + leftHand.palmX * (BPM_MAX - BPM_MIN);
+    smoothBpm = lerp(smoothBpm, targetBpm, SMOOTH);
+    updateBpm(smoothBpm);
+    // Y movement → pitch offset
+    if (prevLeftY !== null) {
+      const dy = prevLeftY - leftHand.palmY; // positive = up
+      pitchOffset += dy * 30; // scale
+      pitchOffset = clamp(pitchOffset, -24, 24);
+    }
+    prevLeftY = leftHand.palmY;
+  }
+  // Right hand X → pitch
+  if (rightHand) {
+    const targetPitch = MIDI_MIN + rightHand.palmX * (MIDI_MAX - MIDI_MIN);
+    smoothPitch = lerp(smoothPitch, targetPitch, SMOOTH);
+    // Y movement
+    if (prevRightY !== null) {
+      const dy = prevRightY - rightHand.palmY;
+      pitchOffset += dy * 30;
+      pitchOffset = clamp(pitchOffset, -24, 24);
+    }
+    prevRightY = rightHand.palmY;
+  }
+  // Decay pitchOffset slowly
+  pitchOffset *= 0.995;
+  currentMidi = Math.round(clamp(smoothPitch + pitchOffset, MIDI_MIN, MIDI_MAX));
+
+  // Update sustained pitch if playing
+  if (gestureState === 'playing' && sustainedOsc1) {
+    updateSustainedPitch(currentMidi);
+  }
+
+  // Update UI
+  bpmValEl.textContent = Math.round(smoothBpm);
+  pitchValEl.textContent = midiToName(currentMidi);
+}
+
+function onStateChange() {
+  if (gestureState === prevGestureState) return;
+  resumeAudio();
+  // Exiting states
+  if (prevGestureState === 'playing') {
+    stopSustained();
+    stopBeat();
+  }
+  // Entering states
+  if (gestureState === 'playing' && audioReady) {
+    startSustained(currentMidi);
+    startBeat();
+  }
+  if (gestureState === 'muted') {
+    stopSustained();
+    stopBeat();
+  }
+  prevGestureState = gestureState;
+}
+
+/* ═══════════════════ RENDERING ═══════════════════ */
+function drawHandOverlay() {
+  const rect = handCanvas.getBoundingClientRect();
+  const w = rect.width, h = rect.height;
+  handCtx.clearRect(0, 0, w, h);
+
+  glowPositions = [];
+  const anyHand = leftHand || rightHand;
+
+  if (!anyHand) {
+    gestureHint.textContent = '👋 等待手部检测…';
+    handDot.className = 'status-dot off';
+    handStatusEl.textContent = '未检测';
+    return;
+  }
+
+  handDot.className = 'status-dot';
+  if (gestureState === 'playing') {
+    handStatusEl.textContent = '演奏中';
+    gestureHint.textContent = '🎵 正在演奏… BPM: ' + Math.round(smoothBpm) + ' | ' + midiToName(currentMidi);
+  } else if (gestureState === 'muted') {
+    handStatusEl.textContent = '静音';
+    gestureHint.textContent = '🔇 双手张开 — 静音';
+  } else {
+    handStatusEl.textContent = '已检测';
+    gestureHint.textContent = '✊ 握拳开始演奏 · 🖐 张手停止';
+  }
+
+  const hands = [];
+  if (leftHand) hands.push({ ...leftHand, side: 'L', color: '#00f0ff' });
+  if (rightHand) hands.push({ ...rightHand, side: 'R', color: '#ff00aa' });
+
+  hands.forEach(hand => {
+    const lm = hand.landmarks;
+    const isFist = hand.fistScore <= FIST_THRESHOLD;
+    const px = hand.palmX * w;
+    const py = hand.palmY * h;
+
+    // Glow
+    if (!REDUCED_MOTION) {
+      glowPositions.push({ x: px, y: py, color: hand.color, fist: isFist });
+      const radius = isFist ? 60 : 40;
+      const alpha = isFist ? 0.35 : 0.2;
+      const grad = handCtx.createRadialGradient(px, py, 0, px, py, radius);
+      grad.addColorStop(0, hand.color + Math.round(alpha * 255).toString(16).padStart(2, '0'));
+      grad.addColorStop(1, hand.color + '00');
+      handCtx.fillStyle = grad;
+      handCtx.fillRect(px - radius, py - radius, radius * 2, radius * 2);
+    }
+
+    // Connections
+    const connections = [
+      [0,1],[1,2],[2,3],[3,4],
+      [0,5],[5,6],[6,7],[7,8],
+      [5,9],[9,10],[10,11],[11,12],
+      [9,13],[13,14],[14,15],[15,16],
+      [13,17],[17,18],[18,19],[19,20],
+      [0,17]
+    ];
+    handCtx.strokeStyle = hand.color + 'aa';
+    handCtx.lineWidth = 2;
+    connections.forEach(([a, b]) => {
+      handCtx.beginPath();
+      handCtx.moveTo(lm[a].x * w, lm[a].y * h);
+      handCtx.lineTo(lm[b].x * w, lm[b].y * h);
+      handCtx.stroke();
+    });
+
+    // Landmarks
+    lm.forEach((p, i) => {
+      const r = [4,8,12,16,20].includes(i) ? 5 : 3;
+      handCtx.beginPath();
+      handCtx.arc(p.x * w, p.y * h, r, 0, Math.PI * 2);
+      handCtx.fillStyle = isFist ? '#ffe100' : hand.color;
+      handCtx.fill();
+    });
+
+    // Label
+    handCtx.font = '600 11px sans-serif';
+    handCtx.fillStyle = hand.color;
+    handCtx.fillText((hand.side === 'L' ? '左' : '右') + (isFist ? ' ✊' : ' 🖐'), px - 14, py - 18);
+  });
+}
+
+function drawWaveform() {
+  const rect = waveCanvas.getBoundingClientRect();
+  const w = rect.width, h = rect.height;
+  waveCtx.clearRect(0, 0, w, h);
+  if (!analyser) return;
+
+  const bufLen = analyser.frequencyBinCount;
+  const dataArray = new Uint8Array(bufLen);
+  analyser.getByteTimeDomainData(dataArray);
+
+  waveCtx.lineWidth = 1.5;
+  waveCtx.strokeStyle = '#00f0ff88';
+  waveCtx.beginPath();
+  const sliceW = w / bufLen;
+  let x = 0;
+  for (let i = 0; i < bufLen; i++) {
+    const v = dataArray[i] / 128.0;
+    const y = (v * h) / 2;
+    if (i === 0) waveCtx.moveTo(x, y);
+    else waveCtx.lineTo(x, y);
+    x += sliceW;
+  }
+  waveCtx.lineTo(w, h / 2);
+  waveCtx.stroke();
+}
+
+function drawSpectrum() {
+  const rect = specCanvas.getBoundingClientRect();
+  const w = rect.width, h = rect.height;
+  specCtx.clearRect(0, 0, w, h);
+  if (!analyser) return;
+
+  const bufLen = analyser.frequencyBinCount;
+  const dataArray = new Uint8Array(bufLen);
+  analyser.getByteFrequencyData(dataArray);
+
+  const bars = 16;
+  const cx = w / 2;
+  const cy = h / 2;
+  const innerR = Math.min(w, h) * 0.18;
+  const maxBarH = Math.min(w, h) * 0.32;
+  const step = Math.floor(bufLen / bars);
+
+  for (let i = 0; i < bars; i++) {
+    let sum = 0;
+    for (let j = 0; j < step; j++) sum += dataArray[i * step + j];
+    const val = sum / step / 255;
+    const barH = val * maxBarH;
+    const angle = (i / bars) * Math.PI * 2 - Math.PI / 2;
+    const nextAngle = ((i + 0.7) / bars) * Math.PI * 2 - Math.PI / 2;
+
+    const x1 = cx + Math.cos(angle) * innerR;
+    const y1 = cy + Math.sin(angle) * innerR;
+    const x2 = cx + Math.cos(angle) * (innerR + barH);
+    const y2 = cy + Math.sin(angle) * (innerR + barH);
+    const x3 = cx + Math.cos(nextAngle) * (innerR + barH);
+    const y3 = cy + Math.sin(nextAngle) * (innerR + barH);
+    const x4 = cx + Math.cos(nextAngle) * innerR;
+    const y4 = cy + Math.sin(nextAngle) * innerR;
+
+    const hue = (i / bars) * 280 + 180;
+    specCtx.fillStyle = `hsla(${hue},90%,60%,${0.4 + val * 0.6})`;
+    specCtx.beginPath();
+    specCtx.moveTo(x1, y1);
+    specCtx.lineTo(x2, y2);
+    specCtx.lineTo(x3, y3);
+    specCtx.lineTo(x4, y4);
+    specCtx.closePath();
+    specCtx.fill();
+  }
+
+  // Center glow
+  if (!REDUCED_MOTION) {
+    const grad = specCtx.createRadialGradient(cx, cy, 0, cx, cy, innerR);
+    grad.addColorStop(0, 'rgba(0,240,255,0.12)');
+    grad.addColorStop(1, 'rgba(0,240,255,0)');
+    specCtx.fillStyle = grad;
+    specCtx.beginPath();
+    specCtx.arc(cx, cy, innerR, 0, Math.PI * 2);
+    specCtx.fill();
+  }
+}
+
+/* ═══════════════════ MAIN LOOP ═══════════════════ */
+function mainLoop() {
+  if (!running) return;
+  updateGestureState();
+  onStateChange();
+  if (leftHand || rightHand) updateControlMapping();
+  drawHandOverlay();
+  drawWaveform();
+  drawSpectrum();
+  requestAnimationFrame(mainLoop);
+}
+
+/* ═══════════════════ RESIZE ═══════════════════ */
+function handleResize() {
+  resizeCanvas(handCanvas);
+  resizeCanvas(waveCanvas);
+  resizeCanvas(specCanvas);
+}
+window.addEventListener('resize', handleResize);
+
+/* ═══════════════════ SOUND BUTTONS ═══════════════════ */
+soundBtns.forEach(btn => {
+  btn.addEventListener('click', () => {
+    initAudio();
+    resumeAudio();
+    soundBtns.forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentSound = btn.dataset.sound;
+    // Restart sustained if playing
+    if (gestureState === 'playing') {
+      stopSustained();
+      startSustained(currentMidi);
+      stopBeat();
+      startBeat();
+    }
+  });
+});
+
+/* ═══════════════════ INIT ═══════════════════ */
+async function init() {
+  // Check MediaPipe
+  if (typeof Hands === 'undefined') {
+    step1.textContent = '❌ 手部识别模型加载失败';
+    step1.classList.add('error');
+    return;
+  }
+
+  // Step 1: Init MediaPipe
+  try {
+    handsSolution = new Hands({
+      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1/${file}`
+    });
+    handsSolution.setOptions({
+      maxNumHands: 2,
+      modelComplexity: 1,
+      minDetectionConfidence: 0.65,
+      minTrackingConfidence: 0.5
+    });
+    handsSolution.onResults(processHands);
+    step1.textContent = '✅ 手部识别模型已就绪';
+    step1.classList.add('done');
+  } catch(e) {
+    step1.textContent = '❌ 模型初始化失败：' + e.message;
+    step1.classList.add('error');
+    return;
+  }
+
+  // Step 2: Camera
+  try {
+    step2.textContent = '正在请求摄像头权限…';
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+      audio: false
+    });
+    videoEl.srcObject = stream;
+    await videoEl.play();
+    step2.textContent = '✅ 摄像头已连接';
+    step2.classList.add('done');
+  } catch(e) {
+    step2.textContent = '❌ 摄像头访问失败';
+    step2.classList.add('error');
+    errorMsg.textContent = e.name === 'NotAllowedError'
+      ? '摄像头权限被拒绝。请在浏览器设置中允许访问摄像头，然后点击重试。'
+      : e.name === 'NotFoundError'
+        ? '未检测到摄像头设备。请连接摄像头后重试。'
+        : '摄像头错误：' + e.message + '。请确保使用 HTTPS 或本地环境。';
+    errorEl.classList.add('show');
+    return;
+  }
+
+  // Step 3: Start
+  step3.textContent = '✅ 准备就绪，开始演奏！';
+  step3.classList.add('done');
+
+  handleResize();
+
+  // Start detection loop
+  running = true;
+
+  async function detectFrame() {
+    if (!running) return;
+    try {
+      await handsSolution.send({ image: videoEl });
+    } catch(e) { /* skip frame */ }
+    requestAnimationFrame(detectFrame);
+  }
+  detectFrame();
+
+  // Start render loop
+  requestAnimationFrame(mainLoop);
+
+  // Hide loading
+  await new Promise(r => setTimeout(r, 600));
+  loadingEl.classList.add('hidden');
+
+  // First interaction to enable audio
+  const enableAudio = () => {
+    initAudio();
+    resumeAudio();
+    document.removeEventListener('click', enableAudio);
+    document.removeEventListener('touchstart', enableAudio);
+  };
+  document.addEventListener('click', enableAudio);
+  document.addEventListener('touchstart', enableAudio);
+}
+
+init();
+
+} catch(e) {
+  console.error('手势音乐初始化错误:', e);
+  const errEl = document.getElementById('errorOverlay');
+  const errMsg = document.getElementById('errorMsg');
+  if (errEl && errMsg) {
+    errMsg.textContent = '初始化错误：' + e.message;
+    errEl.classList.add('show');
+  }
+}
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+<title>手势控制 · MediaPipe Hands</title>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1675466862/camera_utils.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3.1675466124/drawing_utils.min.js"></script>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0e0e12;--card:#1a1a24;--card2:#22223a;--accent:#6c63ff;
+  --accent2:#ff6b9d;--text:#e8e8f0;--text2:#9898b0;--radius:16px;
+  --green:#4ade80;--red:#f87171;--amber:#fbbf24;
+}
+html{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Noto Sans SC",sans-serif;
+  background:var(--bg);color:var(--text);overflow-x:hidden;scroll-behavior:smooth}
+body{min-height:100dvh;display:flex;flex-direction:column;align-items:center;padding:12px 16px 40px}
+h1{font-size:clamp(1.6rem,4vw,2.4rem);font-weight:800;letter-spacing:-.02em;
+  background:linear-gradient(135deg,var(--accent),var(--accent2));-webkit-background-clip:text;
+  -webkit-text-fill-color:transparent;background-clip:text;text-align:center;margin-top:8px}
+.subtitle{text-align:center;color:var(--text2);font-size:.85rem;margin-top:4px;letter-spacing:.04em}
+.hint{background:var(--card);border:1px solid rgba(255,255,255,.06);border-radius:var(--radius);
+  padding:12px 18px;margin:14px 0 10px;font-size:.82rem;color:var(--text2);line-height:1.6;
+  max-width:640px;width:100%;text-align:center}
+.hint em{color:var(--accent);font-style:normal;font-weight:600}
+
+/* video / canvas area */
+.cam-wrap{position:relative;width:100%;max-width:640px;aspect-ratio:4/3;border-radius:var(--radius);
+  overflow:hidden;background:#000;margin-bottom:14px}
+.cam-wrap video,.cam-wrap canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.cam-wrap video{transform:scaleX(-1)}
+.cam-wrap canvas{transform:scaleX(-1);pointer-events:none}
+
+/* gesture HUD */
+.gesture-hud{position:absolute;top:12px;right:12px;background:rgba(0,0,0,.55);backdrop-filter:blur(8px);
+  border-radius:10px;padding:8px 14px;font-size:.82rem;font-weight:600;letter-spacing:.03em;
+  display:flex;align-items:center;gap:8px;z-index:5;pointer-events:none}
+.gesture-hud .dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;transition:background .2s}
+.dot-idle{background:var(--text2)}.dot-ok{background:var(--green)}.dot-fist{background:var(--amber)}.dot-wave{background:var(--accent)}
+
+/* action toast */
+.toast{position:absolute;bottom:16px;left:50%;transform:translateX(-50%);
+  background:rgba(0,0,0,.7);backdrop-filter:blur(6px);border-radius:10px;
+  padding:8px 20px;font-size:.85rem;font-weight:600;opacity:0;transition:opacity .25s;
+  pointer-events:none;z-index:5;white-space:nowrap}
+.toast.show{opacity:1}
+
+/* loading overlay */
+.loading-overlay{position:absolute;inset:0;background:rgba(14,14,18,.92);display:flex;flex-direction:column;
+  align-items:center;justify-content:center;z-index:10;gap:12px;transition:opacity .4s}
+.loading-overlay.hidden{opacity:0;pointer-events:none}
+.spinner{width:36px;height:36px;border:3px solid var(--card2);border-top-color:var(--accent);
+  border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.load-text{font-size:.82rem;color:var(--text2)}
+
+/* error */
+.error-box{position:absolute;inset:0;display:none;flex-direction:column;align-items:center;
+  justify-content:center;gap:14px;background:rgba(14,14,18,.95);z-index:11;padding:20px;text-align:center}
+.error-box.show{display:flex}
+.error-box p{color:var(--text2);font-size:.85rem;max-width:320px;line-height:1.5}
+.retry-btn{background:var(--accent);color:#fff;border:none;border-radius:10px;padding:10px 28px;
+  font-size:.85rem;font-weight:600;cursor:pointer;transition:transform .15s}
+.retry-btn:active{transform:scale(.96)}
+
+/* gallery */
+.gallery{width:100%;max-width:640px}
+.gallery-label{font-size:.78rem;color:var(--text2);margin-bottom:8px;text-align:center}
+.gallery-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.gallery-grid .g-item{position:relative;aspect-ratio:4/3;border-radius:10px;overflow:hidden;
+  border:2px solid transparent;transition:border-color .25s,box-shadow .25s;cursor:pointer}
+.g-item img{width:100%;height:100%;object-fit:cover;display:block}
+.g-item.active{border-color:var(--accent);box-shadow:0 0 0 3px rgba(108,99,255,.25)}
+.g-item.confirmed{border-color:var(--green);box-shadow:0 0 0 3px rgba(74,222,128,.3)}
+.g-item .g-idx{position:absolute;top:4px;left:6px;font-size:.65rem;color:rgba(255,255,255,.6);
+  background:rgba(0,0,0,.45);border-radius:4px;padding:1px 6px;pointer-events:none}
+
+footer{margin-top:auto;padding-top:24px;font-size:.72rem;color:var(--text2);opacity:.5;text-align:center}
+
+/* reduced motion */
+@media(prefers-reduced-motion:reduce){
+  *{animation-duration:0s!important;transition-duration:0s!important}
+  .spinner{display:none}
+}
+/* print */
+@media print{
+  body{background:#fff;color:#000}
+  .cam-wrap,.loading-overlay,.gesture-hud,.toast,.error-box{display:none!important}
+  .gallery-grid{gap:4px}
+  h1{background:none;-webkit-text-fill-color:#000;color:#000}
+}
+/* mobile tweaks */
+@media(max-width:480px){
+  body{padding:8px 10px 30px}
+  .gallery-grid{gap:6px}
+  .hint{font-size:.76rem;padding:10px 12px}
+}
+</style>
+</head>
+<body>
+
+<h1>手势控制</h1>
+<p class="subtitle">MediaPipe Hands · 隔空互动</p>
+<p class="hint">
+  把手放在镜头前试试手势：<em>OK 确认</em>，<em>拳头暂停</em>，<em>左右挥手切换图片</em>。<br/>手和背景要有明显色差。
+</p>
+
+<div class="cam-wrap" id="camWrap">
+  <video id="video" playsinline muted></video>
+  <canvas id="overlay"></canvas>
+  <div class="gesture-hud" id="gestureHud"><span class="dot dot-idle" id="gestureDot"></span><span id="gestureLabel">Idle</span></div>
+  <div class="toast" id="toast"></div>
+  <div class="loading-overlay" id="loadingOverlay">
+    <div class="spinner" id="spinner"></div>
+    <p class="load-text" id="loadText">请求摄像头…</p>
+  </div>
+  <div class="error-box" id="errorBox">
+    <p id="errorMsg">无法访问摄像头，请检查权限设置后重试。</p>
+    <button class="retry-btn" id="retryBtn">重试</button>
+  </div>
+</div>
+
+<section class="gallery">
+  <p class="gallery-label">画廊 · 挥手切换</p>
+  <div class="gallery-grid" id="galleryGrid"></div>
+</section>
+
+<footer>纯前端本地运行，不上云</footer>
+
+<script>
+(function(){
+"use strict";
+try{
+
+/* ── refs ── */
+const video=document.getElementById('video');
+const overlay=document.getElementById('overlay');
+const ctx=overlay.getContext('2d');
+const loadOverlay=document.getElementById('loadingOverlay');
+const loadText=document.getElementById('loadText');
+const spinner=document.getElementById('spinner');
+const errorBox=document.getElementById('errorBox');
+const errorMsg=document.getElementById('errorMsg');
+const retryBtn=document.getElementById('retryBtn');
+const gestureLabel=document.getElementById('gestureLabel');
+const gestureDot=document.getElementById('gestureDot');
+const toast=document.getElementById('toast');
+const galleryGrid=document.getElementById('galleryGrid');
+
+/* ── constants ── */
+const WAVE_THRESHOLD=120;   // px displacement for wave
+const WAVE_DEBOUNCE=900;    // ms between wave triggers
+const OK_DIST=50;           // px thumb-index tip distance threshold
+const FIST_THRESHOLD=55;    // avg finger curl threshold
+const PAUSE_MS=300;         // fist pause duration
+const TOAST_DUR=1200;
+
+/* ── state ── */
+let currentImg=0;
+let confirmedImg=-1;
+let lastWaveTime=0;
+let waveAnchorX=null;
+let isPaused=false;
+let pauseTimer=null;
+let toastTimer=null;
+let prevGesture='Idle';
+const reducedMotion=window.matchMedia('(prefers-reduced-motion:reduce)').matches;
+
+/* ── finger name map ── */
+const FINGER_NAMES=['手腕','拇指','食指','中指','无名指','小指'];
+const FINGER_CONNECTIONS=[
+  [0,1],[1,2],[2,3],[3,4],       // thumb
+  [0,5],[5,6],[6,7],[7,8],       // index
+  [0,9],[9,10],[10,11],[11,12],  // middle
+  [0,13],[13,14],[14,15],[15,16],// ring
+  [0,17],[17,18],[18,19],[19,20],// pinky
+  [5,9],[9,13],[13,17]           // palm
+];
+const FINGER_COLORS=['#f87171','#fb923c','#fbbf24','#4ade80','#60a5fa','#c084fc'];
+
+/* ── gallery images ── */
+const IMG_GRADIENTS=[
+  'linear-gradient(135deg,#667eea,#764ba2)',
+  'linear-gradient(135deg,#f093fb,#f5576c)',
+  'linear-gradient(135deg,#4facfe,#00f2fe)',
+  'linear-gradient(135deg,#43e97b,#38f9d7)',
+  'linear-gradient(135deg,#fa709a,#fee140)',
+  'linear-gradient(135deg,#a18cd1,#fbc2eb)'
+];
+const IMG_URLS=[
+  'https://picsum.photos/seed/gesture1/640/480',
+  'https://picsum.photos/seed/gesture2/640/480',
+  'https://picsum.photos/seed/gesture3/640/480',
+  'https://picsum.photos/seed/gesture4/640/480',
+  'https://picsum.photos/seed/gesture5/640/480',
+  'https://picsum.photos/seed/gesture6/640/480'
+];
+
+/* build gallery */
+IMG_URLS.forEach(function(url,i){
+  const div=document.createElement('div');
+  div.className='g-item'+(i===0?' active':'');
+  div.dataset.idx=i;
+  div.style.background=IMG_GRADIENTS[i];
+  const img=document.createElement('img');
+  img.src=url;img.alt='图片'+(i+1);img.loading='lazy';
+  img.onerror=function(){this.style.display='none'};
+  const idx=document.createElement('span');
+  idx.className='g-idx';idx.textContent=i+1;
+  div.appendChild(img);div.appendChild(idx);
+  div.addEventListener('click',function(){selectImage(i)});
+  galleryGrid.appendChild(div);
+});
+
+function selectImage(i){
+  currentImg=i;
+  confirmedImg=-1;
+  updateGalleryUI();
+}
+function updateGalleryUI(){
+  const items=galleryGrid.querySelectorAll('.g-item');
+  items.forEach(function(el,i){
+    el.classList.remove('active','confirmed');
+    if(i===currentImg) el.classList.add('active');
+    if(i===confirmedImg) el.classList.add('confirmed');
+  });
+}
+
+/* ── toast ── */
+function showToast(msg,color){
+  toast.textContent=msg;
+  toast.style.color=color||'#fff';
+  toast.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer=setTimeout(function(){toast.classList.remove('show')},TOAST_DUR);
+}
+
+/* ── gesture HUD ── */
+function updateHUD(name){
+  if(name===prevGesture) return;
+  prevGesture=name;
+  gestureLabel.textContent=name;
+  gestureDot.className='dot dot-'+name.toLowerCase();
+}
+
+/* ── gesture detection ── */
+function dist(a,b){return Math.hypot(a.x-b.x,a.y-b.y)}
+
+function fingerCurled(lm,mcp,pip,wrist){
+  // finger is curled if tip is closer to wrist than PIP
+  var tipIdx={4:[4],8:[8],12:[12],16:[16],20:[20]};
+  return 0; // placeholder
+}
+
+function detectGesture(lm,W,H){
+  // lm = 21 landmarks, normalised 0-1
+  var px=lm.map(function(l){return{x:l.x*W,y:l.y*H}});
+
+  // OK: thumb tip (4) close to index tip (8)
+  var okDist=dist(px[4],px[8]);
+  if(okDist<OK_DIST){return{name:'OK',data:{okDist:okDist}}}
+
+  // Fist: all fingertips close to their MCPs
+  var curls=[];
+  // thumb: tip(4) close to base(2)
+  curls.push(dist(px[4],px[2])<35);
+  // index: tip(8) close to mcp(5)
+  curls.push(dist(px[8],px[5])<50);
+  // middle: tip(12) close to mcp(9)
+  curls.push(dist(px[12],px[9])<50);
+  // ring: tip(16) close to mcp(13)
+  curls.push(dist(px[16],px[13])<50);
+  // pinky: tip(20) close to mcp(17)
+  curls.push(dist(px[20],px[17])<50);
+  var curledCount=curls.filter(Boolean).length;
+  if(curledCount>=4){return{name:'Fist',data:{curled:curledCount}}}
+
+  // Wave: palm center X movement
+  var palmCX=(px[0].x+px[9].x)/2;
+  if(waveAnchorX===null){
+    waveAnchorX=palmCX;
+    return{name:'Idle'};
+  }
+  var dx=palmCX-waveAnchorX;
+  if(Math.abs(dx)>WAVE_THRESHOLD){
+    var now=Date.now();
+    if(now-lastWaveTime>WAVE_DEBOUNCE){
+      lastWaveTime=now;
+      waveAnchorX=palmCX;
+      return{name:'Wave',data:{dir:dx>0?'right':'left'}};
+    }
+  }
+
+  return{name:'Idle'};
+}
+
+/* ── handle gesture ── */
+function handleGesture(result,W,H){
+  updateHUD(result.name);
+
+  if(isPaused && result.name!=='Fist') return;
+
+  switch(result.name){
+    case 'OK':
+      confirmedImg=currentImg;
+      updateGalleryUI();
+      showToast('✓ 已确认','#4ade80');
+      break;
+    case 'Fist':
+      isPaused=true;
+      showToast('⏸ 已暂停','#fbbf24');
+      clearTimeout(pauseTimer);
+      pauseTimer=setTimeout(function(){isPaused=false},PAUSE_MS);
+      break;
+    case 'Wave':
+      if(result.data.dir==='left'){
+        currentImg=(currentImg+1)%6;
+      }else{
+        currentImg=(currentImg-1+6)%6;
+      }
+      confirmedImg=-1;
+      updateGalleryUI();
+      showToast('切换 → 图片'+(currentImg+1),'#6c63ff');
+      break;
+  }
+}
+
+/* ── draw hand landmarks ── */
+function drawHand(lm,W,H){
+  var px=lm.map(function(l){return{x:l.x*W,y:l.y*H,z:l.z}});
+
+  // connections
+  ctx.lineWidth=2;
+  FINGER_CONNECTIONS.forEach(function(c){
+    var fingerIdx=0;
+    if(c[0]>=1&&c[0]<=4||c[1]>=1&&c[1]<=4) fingerIdx=1;
+    else if(c[0]>=5&&c[0]<=8||c[1]>=5&&c[1]<=8) fingerIdx=2;
+    else if(c[0]>=9&&c[0]<=12||c[1]>=9&&c[1]<=12) fingerIdx=3;
+    else if(c[0]>=13&&c[0]<=16||c[1]>=13&&c[1]<=16) fingerIdx=4;
+    else if(c[0]>=17&&c[0]<=20||c[1]>=17&&c[1]<=20) fingerIdx=5;
+
+    ctx.strokeStyle=FINGER_COLORS[fingerIdx];
+    ctx.beginPath();
+    ctx.moveTo(px[c[0]].x,px[c[0]].y);
+    ctx.lineTo(px[c[1]].x,px[c[1]].y);
+    ctx.stroke();
+  });
+
+  // points
+  px.forEach(function(p,i){
+    var fingerIdx=0;
+    if(i>=1&&i<=4) fingerIdx=1;
+    else if(i>=5&&i<=8) fingerIdx=2;
+    else if(i>=9&&i<=12) fingerIdx=3;
+    else if(i>=13&&i<=16) fingerIdx=4;
+    else if(i>=17&&i<=20) fingerIdx=5;
+
+    ctx.fillStyle=FINGER_COLORS[fingerIdx];
+    ctx.beginPath();
+    ctx.arc(p.x,p.y,i%4===0?5:3.5,0,Math.PI*2);
+    ctx.fill();
+  });
+
+  // finger labels on tips
+  ctx.font='bold 11px sans-serif';
+  ctx.textAlign='center';
+  var tips=[4,8,12,16,20];
+  tips.forEach(function(ti,i){
+    ctx.fillStyle='rgba(255,255,255,.85)';
+    ctx.fillText(FINGER_NAMES[i+1],px[ti].x,px[ti].y-10);
+  });
+}
+
+/* ── MediaPipe Hands ── */
+var hands;
+var camera;
+
+function setLoad(msg){
+  loadText.textContent=msg;
+}
+function hideLoading(){
+  loadOverlay.classList.add('hidden');
+}
+function showError(msg){
+  errorMsg.textContent=msg||'无法访问摄像头，请检查权限设置后重试。';
+  errorBox.classList.add('show');
+  loadOverlay.classList.add('hidden');
+}
+function hideError(){
+  errorBox.classList.remove('show');
+}
+
+function onResults(results){
+  var W=overlay.width=video.videoWidth||640;
+  var H=overlay.height=video.videoHeight||480;
+  ctx.clearRect(0,0,W,H);
+
+  if(results.multiHandLandmarks&&results.multiHandLandmarks.length){
+    results.multiHandLandmarks.forEach(function(lm){
+      drawHand(lm,W,H);
+      var gesture=detectGesture(lm,W,H);
+      handleGesture(gesture,W,H);
+    });
+  }else{
+    waveAnchorX=null;
+    updateHUD('Idle');
+  }
+}
+
+function initHands(){
+  return new Promise(function(resolve,reject){
+    try{
+      setLoad('下载模型…');
+      hands=new Hands({locateFile:function(file){
+        return 'https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/'+file;
+      }});
+      hands.setOptions({
+        maxNumHands:1,
+        modelComplexity:1,
+        minDetectionConfidence:0.7,
+        minTrackingConfidence:0.6
+      });
+      hands.onResults(onResults);
+      setLoad('初始化手部模型…');
+      resolve();
+    }catch(e){
+      reject(e);
+    }
+  });
+}
+
+function startCamera(){
+  return new Promise(function(resolve,reject){
+    setLoad('请求摄像头…');
+    camera=new Camera(video,{
+      onFrame:function(){
+        return hands.send({image:video});
+      },
+      width:640,
+      height:480
+    });
+    camera.start().then(function(){
+      setLoad('准备就绪');
+      setTimeout(hideLoading,reducedMotion?0:400);
+      resolve();
+    }).catch(function(e){
+      reject(e);
+    });
+  });
+}
+
+retryBtn.addEventListener('click',function(){
+  hideError();
+  loadOverlay.classList.remove('hidden');
+  init().catch(function(e){
+    showError(e.message||'初始化失败，请重试。');
+  });
+});
+
+function init(){
+  return initHands().then(function(){
+    return startCamera();
+  });
+}
+
+// kick off
+init().catch(function(e){
+  console.error(e);
+  showError(e.message||'初始化失败，请重试。');
+});
+
+}catch(e){
+  console.error('Gesture init error:',e);
+  var eb=document.getElementById('errorBox');
+  var em=document.getElementById('errorMsg');
+  if(eb&&em){em.textContent='脚本初始化出错：'+e.message;eb.classList.add('show');}
+  var lo=document.getElementById('loadingOverlay');
+  if(lo) lo.classList.add('hidden');
+}
+})();
+</script>
+</body>
+</html>

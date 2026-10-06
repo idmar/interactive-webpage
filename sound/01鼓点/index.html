@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>鼓点 - 声音互动鼓组</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+:root{
+--bg1:#0a0a0a;--bg2:#1a1a2e;
+--kick:#e8722a;--snare:#3a8fd4;--hihat:#e8c82a;--tom:#9b4dca;
+--kick-g:rgba(232,114,42,.6);--snare-g:rgba(58,143,212,.6);
+--hihat-g:rgba(232,200,42,.6);--tom-g:rgba(155,77,202,.6);
+}
+html,body{height:100%;overflow:hidden}
+body{
+font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+background:linear-gradient(160deg,var(--bg1),var(--bg2));
+color:#e0e0e0;display:flex;flex-direction:column;align-items:center;
+justify-content:space-between;padding:20px 16px;
+transition:background .3s;
+}
+body.pulse{background:linear-gradient(160deg,#0f0a14,#1a1a2e)}
+
+header{text-align:center;flex-shrink:0}
+header h1{font-size:clamp(1.8rem,5vw,2.6rem);font-weight:700;letter-spacing:.08em;
+background:linear-gradient(90deg,var(--kick),var(--hihat));
+-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+header p{font-size:.85rem;color:#888;margin-top:4px}
+
+.pads{
+display:grid;grid-template-columns:1fr 1fr;gap:clamp(12px,3vw,24px);
+flex:1;align-content:center;width:100%;max-width:480px;
+}
+.pad{
+position:relative;aspect-ratio:1/1;border-radius:22px;cursor:pointer;
+display:flex;flex-direction:column;align-items:center;justify-content:center;
+border:2px solid rgba(255,255,255,.08);
+transition:transform .08s,box-shadow .15s;
+user-select:none;overflow:visible;
+}
+.pad:active{transform:scale(.93)}
+.pad .label{font-size:clamp(1rem,3.5vw,1.4rem);font-weight:700;pointer-events:none}
+.pad .sub{font-size:.7rem;opacity:.6;margin-top:2px;pointer-events:none}
+
+.pad.kick{background:radial-gradient(circle at 40% 35%,#f09040,#c05a18);box-shadow:0 0 20px rgba(232,114,42,.15)}
+.pad.snare{background:radial-gradient(circle at 40% 35%,#5aafdf,#2a6faa);box-shadow:0 0 20px rgba(58,143,212,.15)}
+.pad.hihat{background:radial-gradient(circle at 40% 35%,#f0d840,#c0a018);box-shadow:0 0 20px rgba(232,200,42,.15)}
+.pad.tom{background:radial-gradient(circle at 40% 35%,#b06ae0,#7a30b0);box-shadow:0 0 20px rgba(155,77,202,.15)}
+
+.pad.hit{animation:hitFlash .25s ease-out}
+@keyframes hitFlash{
+0%{transform:scale(.92);filter:brightness(1.6)}
+100%{transform:scale(1);filter:brightness(1)}
+}
+
+.ripple{
+position:absolute;border-radius:50%;pointer-events:none;
+width:40px;height:40px;top:50%;left:50%;
+transform:translate(-50%,-50%) scale(0);
+animation:rippleOut .5s ease-out forwards;
+}
+.ripple.kick{border:3px solid var(--kick-g);box-shadow:0 0 12px var(--kick-g)}
+.ripple.snare{border:3px solid var(--snare-g);box-shadow:0 0 12px var(--snare-g)}
+.ripple.hihat{border:3px solid var(--hihat-g);box-shadow:0 0 12px var(--hihat-g)}
+.ripple.tom{border:3px solid var(--tom-g);box-shadow:0 0 12px var(--tom-g)}
+@keyframes rippleOut{
+0%{transform:translate(-50%,-50%) scale(0);opacity:1}
+100%{transform:translate(-50%,-50%) scale(6);opacity:0}
+}
+
+.glow{
+position:absolute;inset:-8px;border-radius:26px;pointer-events:none;opacity:0;
+transition:opacity .12s;
+}
+.pad.hit .glow{opacity:1}
+.pad.kick .glow{box-shadow:0 0 40px 8px var(--kick-g)}
+.pad.snare .glow{box-shadow:0 0 40px 8px var(--snare-g)}
+.pad.hihat .glow{box-shadow:0 0 40px 8px var(--hihat-g)}
+.pad.tom .glow{box-shadow:0 0 40px 8px var(--tom-g)}
+
+footer{flex-shrink:0;width:100%;max-width:480px;display:flex;flex-direction:column;align-items:center;gap:10px;padding-bottom:env(safe-area-inset-bottom,8px)}
+
+.mic-row{display:flex;align-items:center;gap:14px;width:100%}
+.mic-btn{
+width:52px;height:52px;border-radius:50%;border:2px solid #444;
+background:#1a1a1a;cursor:pointer;display:flex;align-items:center;justify-content:center;
+transition:border-color .2s,background .2s,box-shadow .2s;flex-shrink:0;
+}
+.mic-btn.active{border-color:var(--kick);background:#2a1a0a;box-shadow:0 0 16px rgba(232,114,42,.3)}
+.mic-btn svg{width:22px;height:22px;fill:#aaa;transition:fill .2s}
+.mic-btn.active svg{fill:var(--kick)}
+
+.vol-wrap{flex:1;display:flex;flex-direction:column;gap:4px}
+.vol-label{font-size:.65rem;color:#666;display:flex;justify-content:space-between}
+.vol-bar{height:8px;border-radius:4px;background:#222;overflow:hidden}
+.vol-fill{height:100%;width:0%;border-radius:4px;
+background:linear-gradient(90deg,var(--kick),var(--hihat));
+transition:width .06s}
+
+.threshold-line{
+position:relative;height:8px;margin-top:-8px;width:100%;pointer-events:none;
+}
+.threshold-marker{
+position:absolute;top:-2px;width:2px;height:12px;background:#fff;opacity:.4;
+border-radius:1px;
+}
+
+.hint{font-size:.65rem;color:#555;text-align:center}
+
+@media(min-width:600px){
+.pads{max-width:560px;gap:28px}
+}
+</style>
+</head>
+<body>
+<header>
+<h1>鼓 点</h1>
+<p>点击鼓垫 · 感受节奏 · 用声音驱动</p>
+</header>
+
+<div class="pads" id="pads">
+<div class="pad snare" data-drum="snare">
+<div class="glow"></div>
+<span class="label">Snare</span><span class="sub">军鼓</span>
+</div>
+<div class="pad hihat" data-drum="hihat">
+<div class="glow"></div>
+<span class="label">Hi-Hat</span><span class="sub">踩镲</span>
+</div>
+<div class="pad kick" data-drum="kick">
+<div class="glow"></div>
+<span class="label">Kick</span><span class="sub">底鼓</span>
+</div>
+<div class="pad tom" data-drum="tom">
+<div class="glow"></div>
+<span class="label">Tom</span><span class="sub">嗵鼓</span>
+</div>
+</div>
+
+<footer>
+<div class="mic-row">
+<button class="mic-btn" id="micBtn" aria-label="麦克风开关">
+<svg viewBox="0 0 24 24"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.93V21h2v-3.07A7 7 0 0 0 19 11h-2z"/></svg>
+</button>
+<div class="vol-wrap">
+<div class="vol-label"><span>麦克风音量</span><span id="volVal">0%</span></div>
+<div class="vol-bar"><div class="vol-fill" id="volFill"></div></div>
+</div>
+</div>
+<div class="hint">开启麦克风后，音量超过阈值自动触发底鼓</div>
+</footer>
+
+<script>
+(function(){
+"use strict";
+
+/* ---- Audio Context ---- */
+let ctx;
+function ensureCtx(){
+if(!ctx) ctx=new(window.AudioContext||window.webkitAudioContext)();
+if(ctx.state==="suspended") ctx.resume();
+}
+
+/* ---- Noise Buffer ---- */
+let noiseBuf;
+function getNoise(){
+if(noiseBuf) return noiseBuf;
+const len=ctx.sampleRate*0.5;
+noiseBuf=ctx.createBuffer(1,len,ctx.sampleRate);
+const d=noiseBuf.getChannelData(0);
+for(let i=0;i<len;i++) d[i]=Math.random()*2-1;
+return noiseBuf;
+}
+
+/* ---- Synthesis ---- */
+function synthKick(){
+ensureCtx();const t=ctx.currentTime;
+const osc=ctx.createOscillator();
+const g=ctx.createGain();
+osc.type="sine";
+osc.frequency.setValueAtTime(160,t);
+osc.frequency.exponentialRampToValueAtTime(30,t+0.12);
+g.gain.setValueAtTime(1.2,t);
+g.gain.exponentialRampToValueAtTime(0.001,t+0.4);
+osc.connect(g);g.connect(ctx.destination);
+osc.start(t);osc.stop(t+0.4);
+// click transient
+const n=ctx.createBufferSource();n.buffer=getNoise();
+const nf=ctx.createBiquadFilter();nf.type="highpass";nf.frequency.value=3000;
+const ng=ctx.createGain();ng.gain.setValueAtTime(0.4,t);ng.gain.exponentialRampToValueAtTime(0.001,t+0.03);
+n.connect(nf);nf.connect(ng);ng.connect(ctx.destination);
+n.start(t);n.stop(t+0.05);
+}
+
+function synthSnare(){
+ensureCtx();const t=ctx.currentTime;
+// body
+const osc=ctx.createOscillator();const g=ctx.createGain();
+osc.type="triangle";osc.frequency.setValueAtTime(200,t);
+osc.frequency.exponentialRampToValueAtTime(120,t+0.05);
+g.gain.setValueAtTime(0.7,t);g.gain.exponentialRampToValueAtTime(0.001,t+0.15);
+osc.connect(g);g.connect(ctx.destination);osc.start(t);osc.stop(t+0.15);
+// noise
+const n=ctx.createBufferSource();n.buffer=getNoise();
+const f=ctx.createBiquadFilter();f.type="bandpass";f.frequency.value=4000;f.Q.value=0.8;
+const ng=ctx.createGain();ng.gain.setValueAtTime(0.9,t);ng.gain.exponentialRampToValueAtTime(0.001,t+0.2);
+n.connect(f);f.connect(ng);ng.connect(ctx.destination);n.start(t);n.stop(t+0.22);
+}
+
+function synthHihat(){
+ensureCtx();const t=ctx.currentTime;
+const n=ctx.createBufferSource();n.buffer=getNoise();
+const f=ctx.createBiquadFilter();f.type="highpass";f.frequency.value=7000;
+const g=ctx.createGain();g.gain.setValueAtTime(0.5,t);g.gain.exponentialRampToValueAtTime(0.001,t+0.08);
+n.connect(f);f.connect(g);g.connect(ctx.destination);n.start(t);n.stop(t+0.1);
+}
+
+function synthTom(){
+ensureCtx();const t=ctx.currentTime;
+const osc=ctx.createOscillator();const g=ctx.createGain();
+osc.type="sine";osc.frequency.setValueAtTime(220,t);
+osc.frequency.exponentialRampToValueAtTime(80,t+0.2);
+g.gain.setValueAtTime(0.9,t);g.gain.exponentialRampToValueAtTime(0.001,t+0.35);
+osc.connect(g);g.connect(ctx.destination);osc.start(t);osc.stop(t+0.35);
+}
+
+const drums={kick:synthKick,snare:synthSnare,hihat:synthHihat,tom:synthTom};
+
+/* ---- Pad Interaction ---- */
+const pads=document.querySelectorAll(".pad");
+function triggerPad(drum){
+drums[drum]();
+const el=document.querySelector(".pad."+drum);
+el.classList.remove("hit");void el.offsetWidth;el.classList.add("hit");
+setTimeout(()=>el.classList.remove("hit"),260);
+// ripple
+const r=document.createElement("div");r.className="ripple "+drum;
+el.appendChild(r);setTimeout(()=>r.remove(),520);
+// bg pulse
+document.body.classList.add("pulse");
+setTimeout(()=>document.body.classList.remove("pulse"),200);
+}
+
+pads.forEach(p=>{
+const d=p.dataset.drum;
+p.addEventListener("pointerdown",e=>{e.preventDefault();triggerPad(d)});
+});
+
+/* ---- Keyboard ---- */
+const keyMap={j:"kick",k:"snare",f:"hihat",l:"tom"," ":"kick"};
+document.addEventListener("keydown",e=>{
+if(e.repeat)return;const d=keyMap[e.key];if(d)triggerPad(d);
+});
+
+/* ---- Microphone ---- */
+const micBtn=document.getElementById("micBtn");
+const volFill=document.getElementById("volFill");
+const volVal=document.getElementById("volVal");
+let micActive=false,analyser,mediaStream,micDataArr;
+const THRESHOLD=0.32;
+const THRESHOLD_PCT=THRESHOLD*100;
+
+micBtn.addEventListener("click",async()=>{
+if(!micActive){
+try{
+ensureCtx();
+mediaStream=await navigator.mediaDevices.getUserMedia({audio:true});
+const src=ctx.createMediaStreamSource(mediaStream);
+analyser=ctx.createAnalyser();analyser.fftSize=256;
+src.connect(analyser);
+micDataArr=new Uint8Array(analyser.frequencyBinCount);
+micActive=true;micBtn.classList.add("active");
+requestAnimationFrame(micLoop);
+}catch(err){console.warn("Mic error:",err)}
+}else{
+micActive=false;micBtn.classList.remove("active");
+if(mediaStream) mediaStream.getTracks().forEach(t=>t.stop());
+volFill.style.width="0%";volVal.textContent="0%";
+}
+});
+
+let lastMicHit=0;
+function micLoop(){
+if(!micActive)return;
+analyser.getByteTimeDomainData(micDataArr);
+let peak=0;
+for(let i=0;i<micDataArr.length;i++){
+const v=Math.abs(micDataArr[i]/128-1);
+if(v>peak)peak=v;
+}
+const pct=Math.min(peak/0.8*100,100);
+volFill.style.width=pct.toFixed(0)+"%";
+volVal.textContent=pct.toFixed(0)+"%";
+
+const now=performance.now();
+if(peak>THRESHOLD&&now-lastMicHit>280){
+lastMicHit=now;
+triggerPad("kick");
+}
+requestAnimationFrame(micLoop);
+}
+
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+<title>AR 涂鸦墙 — 在现实空间中绘制</title>
+<style>
+/* ===== 全局 & 深色主题 ===== */
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:100%;height:100%;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:#0a0a0f;color:#e0e0e6;overflow:hidden}
+a{color:#7eb8ff}
+button{font-family:inherit}
+
+/* ===== 加载遮罩 ===== */
+#loading-mask{position:fixed;inset:0;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#0a0a0f;transition:opacity .5s}
+#loading-mask.fade-out{opacity:0;pointer-events:none}
+.loading-spinner{width:48px;height:48px;border:4px solid #2a2a3a;border-top-color:#7eb8ff;border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.loading-text{margin-top:18px;font-size:15px;color:#888}
+.loading-step{font-size:13px;color:#555;margin-top:8px;min-height:20px}
+
+/* ===== 错误遮罩 ===== */
+#error-mask{position:fixed;inset:0;z-index:10000;display:none;flex-direction:column;align-items:center;justify-content:center;background:rgba(10,10,15,.96);padding:32px;text-align:center}
+#error-mask.show{display:flex}
+#error-mask h2{font-size:20px;color:#ff6b6b;margin-bottom:12px}
+#error-mask p{font-size:14px;color:#aaa;line-height:1.7;max-width:340px}
+#error-mask button{margin-top:20px;padding:10px 28px;border:none;border-radius:20px;background:#7eb8ff;color:#0a0a0f;font-size:14px;font-weight:600;cursor:pointer}
+
+/* ===== 头部 ===== */
+#header{position:fixed;top:0;left:0;right:0;z-index:100;padding:16px 20px 12px;background:linear-gradient(180deg,rgba(10,10,15,.92) 60%,transparent);pointer-events:none}
+#header h1{font-size:22px;font-weight:700;color:#fff;letter-spacing:.5px}
+#header .subtitle{font-size:13px;color:#888;margin-top:2px}
+#header .tip{font-size:12px;color:#666;margin-top:6px;line-height:1.6;max-width:420px}
+
+/* ===== 工具栏 ===== */
+#toolbar{position:fixed;bottom:0;left:0;right:0;z-index:200;display:flex;align-items:center;gap:8px;padding:12px 16px;background:rgba(18,18,28,.94);backdrop-filter:blur(12px);border-top:1px solid rgba(255,255,255,.06);overflow-x:auto;-webkit-overflow-scrolling:touch}
+@media(min-width:768px){#toolbar{left:auto;right:16px;bottom:16px;flex-direction:column;width:56px;padding:12px 8px;border-radius:16px;border:1px solid rgba(255,255,255,.08);gap:10px;overflow-x:visible}}
+
+.tool-group{display:flex;align-items:center;gap:6px;flex-shrink:0}
+@media(min-width:768px){.tool-group{flex-direction:column}}
+.tool-divider{width:1px;height:24px;background:rgba(255,255,255,.1);flex-shrink:0}
+@media(min-width:768px){.tool-divider{width:24px;height:1px}}
+
+/* 颜色 */
+.color-btn{width:26px;height:26px;border-radius:50%;border:2px solid transparent;cursor:pointer;transition:transform .15s,border-color .15s;flex-shrink:0}
+.color-btn:hover{transform:scale(1.15)}
+.color-btn.active{border-color:#fff;transform:scale(1.15)}
+
+/* 形状 */
+.shape-btn{width:32px;height:32px;border-radius:8px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.05);color:#ccc;font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background .15s,border-color .15s;flex-shrink:0}
+.shape-btn:hover{background:rgba(255,255,255,.1)}
+.shape-btn.active{background:rgba(126,184,255,.15);border-color:#7eb8ff;color:#7eb8ff}
+
+/* 滑块 */
+.slider-wrap{display:flex;align-items:center;gap:6px}
+.slider-wrap input[type=range]{-webkit-appearance:none;width:80px;height:4px;border-radius:2px;background:#2a2a3a;outline:none}
+.slider-wrap input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;background:#7eb8ff;cursor:pointer}
+.slider-label{font-size:11px;color:#888;min-width:24px;text-align:center}
+
+/* 动作按钮 */
+.action-btn{height:32px;padding:0 12px;border-radius:8px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.05);color:#ccc;font-size:12px;cursor:pointer;white-space:nowrap;transition:background .15s}
+.action-btn:hover{background:rgba(255,255,255,.12)}
+.action-btn.danger{border-color:rgba(255,100,100,.2);color:#ff6b6b}
+.action-btn.danger:hover{background:rgba(255,100,100,.1)}
+.action-btn.primary{background:rgba(126,184,255,.15);border-color:rgba(126,184,255,.3);color:#7eb8ff}
+.action-btn.primary:hover{background:rgba(126,184,255,.25)}
+
+/* ===== 说明面板 ===== */
+#info-panel{position:fixed;top:auto;bottom:70px;left:12px;z-index:150;width:calc(100% - 24px);max-width:380px;background:rgba(18,18,28,.96);backdrop-filter:blur(12px);border-radius:14px;border:1px solid rgba(255,255,255,.08);overflow:hidden;transition:max-height .35s ease,padding .35s ease}
+@media(min-width:768px){#info-panel{bottom:16px;left:16px}}
+#info-toggle{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;cursor:pointer;user-select:none}
+#info-toggle h3{font-size:14px;font-weight:600;color:#ddd}
+#info-toggle .arrow{font-size:12px;color:#888;transition:transform .3s}
+#info-panel.collapsed #info-toggle .arrow{transform:rotate(180deg)}
+#info-content{padding:0 16px 16px;font-size:13px;color:#999;line-height:1.7}
+#info-panel.collapsed #info-content{display:none}
+#info-content ol{padding-left:18px;margin:8px 0}
+#info-content li{margin-bottom:4px}
+#info-content .marker-preview{display:flex;align-items:center;gap:14px;margin:12px 0;padding:12px;background:rgba(255,255,255,.03);border-radius:10px}
+#info-content .marker-svg{flex-shrink:0}
+#info-content .marker-link{display:inline-block;margin-top:8px;font-size:12px;color:#7eb8ff;text-decoration:underline}
+
+/* ===== A-Frame 容器 ===== */
+#ar-container{position:fixed;inset:0;z-index:1}
+#ar-container a-scene{width:100%;height:100%}
+
+/* ===== 2D 画布覆盖层（绘制用） ===== */
+#draw-canvas{position:fixed;inset:0;z-index:50;pointer-events:none}
+#draw-canvas.active{pointer-events:auto;cursor:crosshair}
+
+/* ===== prefers-reduced-motion ===== */
+@media(prefers-reduced-motion:reduce){
+  .loading-spinner{animation:none;border-top-color:transparent}
+  #loading-mask,#info-panel,#info-toggle .arrow{transition:none}
+  .color-btn,.shape-btn,.action-btn{transition:none}
+}
+
+/* ===== 打印样式 ===== */
+@media print{
+  body{background:#fff;color:#000}
+  #loading-mask,#error-mask,#toolbar,#info-panel,#draw-canvas,#ar-container,#header .tip{display:none!important}
+  #header{position:static;background:none;padding:20px}
+  #header h1{color:#000;font-size:28px}
+  #header .subtitle{color:#333;font-size:16px}
+  .print-marker{display:block!important;page-break-inside:avoid;margin-top:30px}
+  .print-marker h2{font-size:18px;margin-bottom:12px}
+  .print-marker svg{border:1px solid #ccc}
+}
+.print-marker{display:none}
+</style>
+</head>
+<body>
+
+<!-- 加载遮罩 -->
+<div id="loading-mask">
+  <div class="loading-spinner"></div>
+  <div class="loading-text">初始化 AR 涂鸦墙…</div>
+  <div class="loading-step" id="loading-step"></div>
+</div>
+
+<!-- 错误遮罩 -->
+<div id="error-mask">
+  <h2 id="error-title">摄像头访问失败</h2>
+  <p id="error-desc">请确保已授权摄像头权限，并且设备支持 WebRTC。如果使用了广告拦截器或隐私模式，请尝试关闭后刷新页面。</p>
+  <button id="error-retry" onclick="location.reload()">重试</button>
+</div>
+
+<!-- 头部 -->
+<div id="header">
+  <h1>AR 涂鸦墙</h1>
+  <div class="subtitle">在现实空间中绘制</div>
+  <div class="tip">将摄像头对准墙面或桌面的 hiro marker，在空中绘制你的 AR 涂鸦。先保持标记清晰，再开始绘画。</div>
+</div>
+
+<!-- AR 场景容器 -->
+<div id="ar-container"></div>
+
+<!-- 2D 绘制画布 -->
+<canvas id="draw-canvas"></canvas>
+
+<!-- 工具栏 -->
+<div id="toolbar" style="display:none">
+  <!-- 颜色 -->
+  <div class="tool-group" id="color-group"></div>
+  <div class="tool-divider"></div>
+  <!-- 形状 -->
+  <div class="tool-group" id="shape-group">
+    <button class="shape-btn active" data-shape="line" title="线条">✏️</button>
+    <button class="shape-btn" data-shape="circle" title="圆形">◯</button>
+    <button class="shape-btn" data-shape="rect" title="方形">▭</button>
+  </div>
+  <div class="tool-divider"></div>
+  <!-- 粗细 -->
+  <div class="tool-group slider-wrap">
+    <span class="slider-label" id="size-label">4</span>
+    <input type="range" id="brush-size" min="2" max="20" value="4"/>
+  </div>
+  <div class="tool-divider"></div>
+  <!-- 动作 -->
+  <div class="tool-group">
+    <button class="action-btn danger" id="btn-clear" title="清空画布">清空</button>
+    <button class="action-btn primary" id="btn-save" title="保存涂鸦">保存</button>
+  </div>
+</div>
+
+<!-- 说明面板 -->
+<div id="info-panel" style="display:none">
+  <div id="info-toggle">
+    <h3>📖 使用说明</h3>
+    <span class="arrow">▼</span>
+  </div>
+  <div id="info-content">
+    <ol>
+      <li>打印下方 hiro marker（或直接屏幕显示）</li>
+      <li>打开本页面，允许摄像头权限</li>
+      <li>将摄像头对准 marker</li>
+      <li>识别成功后，在屏幕上直接绘制涂鸦</li>
+      <li>涂鸦会跟随 marker 固定在空间中</li>
+    </ol>
+    <div class="marker-preview">
+      <svg class="marker-svg" width="80" height="80" viewBox="0 0 80 80" xmlns="http://www.w3.org/2000/svg">
+        <!-- Hiro marker 简化示意 -->
+        <rect width="80" height="80" fill="#fff"/>
+        <rect x="4" y="4" width="72" height="72" fill="#000"/>
+        <rect x="10" y="10" width="60" height="60" fill="#fff"/>
+        <rect x="16" y="16" width="20" height="20" fill="#000"/>
+        <rect x="44" y="16" width="20" height="20" fill="#000"/>
+        <rect x="16" y="44" width="20" height="20" fill="#000"/>
+        <rect x="44" y="44" width="20" height="20" fill="#000"/>
+        <rect x="28" y="28" width="24" height="24" fill="#000"/>
+        <rect x="32" y="32" width="16" height="16" fill="#fff"/>
+        <rect x="36" y="36" width="8" height="8" fill="#000"/>
+      </svg>
+      <div>
+        <div style="font-size:12px;color:#aaa">Hiro Marker 示意</div>
+        <a class="marker-link" href="https://jeromeetienne.github.io/AR.js/data/images/HIRO.jpg" target="_blank" rel="noopener">下载完整 Hiro Marker (JPG) ↗</a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 打印区域 -->
+<div class="print-marker">
+  <h2>Hiro Marker</h2>
+  <svg width="200" height="200" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+    <rect width="200" height="200" fill="#fff"/>
+    <rect x="10" y="10" width="180" height="180" fill="#000"/>
+    <rect x="25" y="25" width="150" height="150" fill="#fff"/>
+    <rect x="40" y="40" width="50" height="50" fill="#000"/>
+    <rect x="110" y="40" width="50" height="50" fill="#000"/>
+    <rect x="40" y="110" width="50" height="50" fill="#000"/>
+    <rect x="110" y="110" width="50" height="50" fill="#000"/>
+    <rect x="70" y="70" width="60" height="60" fill="#000"/>
+    <rect x="80" y="80" width="40" height="40" fill="#fff"/>
+    <rect x="90" y="90" width="20" height="20" fill="#000"/>
+  </svg>
+</div>
+
+<!-- AR.js + A-Frame -->
+<script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+<script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js"></script>
+
+<script>
+(function(){
+"use strict";
+
+/* ===== 工具函数 ===== */
+function $(s){return document.querySelector(s)}
+function $$(s){return document.querySelectorAll(s)}
+function showEl(el){el&&(el.style.display="")}
+function hideEl(el){el&&(el.style.display="none")}
+
+/* ===== 状态 ===== */
+var state = {
+  color: "#ffffff",
+  brushSize: 4,
+  shape: "line",
+  isDrawing: false,
+  markerFound: false,
+  drawStrokes: [], // 存储绘制数据用于重绘
+  currentStroke: null
+};
+
+/* ===== 颜色预设 ===== */
+var COLORS = [
+  {hex:"#ffffff",name:"白"},
+  {hex:"#ff4444",name:"红"},
+  {hex:"#ffaa00",name:"橙"},
+  {hex:"#44dd44",name:"绿"},
+  {hex:"#4488ff",name:"蓝"},
+  {hex:"#cc44ff",name:"紫"}
+];
+
+/* ===== 加载阶段 ===== */
+var loadingStep = $("#loading-step");
+var steps = [
+  "正在加载 3D 引擎…",
+  "正在初始化 AR 追踪…",
+  "正在请求摄像头权限…",
+  "准备就绪"
+];
+var stepIdx = 0;
+function nextStep(){
+  if(stepIdx < steps.length){
+    if(loadingStep) loadingStep.textContent = steps[stepIdx];
+    stepIdx++;
+  }
+}
+
+/* ===== 错误显示 ===== */
+function showError(title, desc){
+  var mask = $("#error-mask");
+  if(title) $("#error-title").textContent = title;
+  if(desc) $("#error-desc").textContent = desc;
+  if(mask) mask.classList.add("show");
+  var lm = $("#loading-mask");
+  if(lm) lm.classList.add("fade-out");
+}
+
+/* ===== 构建颜色按钮 ===== */
+(function buildColors(){
+  var g = $("#color-group");
+  if(!g) return;
+  COLORS.forEach(function(c,i){
+    var btn = document.createElement("button");
+    btn.className = "color-btn" + (i===0?" active":"");
+    btn.style.background = c.hex;
+    btn.title = c.name;
+    btn.dataset.color = c.hex;
+    btn.addEventListener("click", function(){
+      $$(".color-btn").forEach(function(b){b.classList.remove("active")});
+      btn.classList.add("active");
+      state.color = c.hex;
+    });
+    g.appendChild(btn);
+  });
+  // 自定义颜色
+  var picker = document.createElement("input");
+  picker.type = "color";
+  picker.value = "#ffffff";
+  picker.title = "自定义颜色";
+  picker.style.cssText = "width:26px;height:26px;border:none;border-radius:50%;cursor:pointer;background:none;padding:0";
+  picker.addEventListener("input", function(){
+    $$(".color-btn").forEach(function(b){b.classList.remove("active")});
+    state.color = picker.value;
+  });
+  g.appendChild(picker);
+})();
+
+/* ===== 形状切换 ===== */
+$$(".shape-btn").forEach(function(btn){
+  btn.addEventListener("click", function(){
+    $$(".shape-btn").forEach(function(b){b.classList.remove("active")});
+    btn.classList.add("active");
+    state.shape = btn.dataset.shape;
+  });
+});
+
+/* ===== 粗细滑块 ===== */
+var brushSlider = $("#brush-size");
+var sizeLabel = $("#size-label");
+if(brushSlider){
+  brushSlider.addEventListener("input", function(){
+    state.brushSize = parseInt(brushSlider.value);
+    if(sizeLabel) sizeLabel.textContent = brushSlider.value;
+  });
+}
+
+/* ===== 说明面板折叠 ===== */
+var infoPanel = $("#info-panel");
+var infoToggle = $("#info-toggle");
+if(infoToggle && infoPanel){
+  infoToggle.addEventListener("click", function(){
+    infoPanel.classList.toggle("collapsed");
+  });
+}
+
+/* ===== 初始化 A-Frame + AR.js 场景 ===== */
+try {
+  nextStep(); // 加载 3D 引擎
+
+  // 创建 A-Frame 场景
+  var scene = document.createElement("a-scene");
+  scene.setAttribute("embedded","");
+  scene.setAttribute("arjs","sourceType:webcam;debugUI:false;trackingMaxLost:10;trackingMinConfidence:0.5");
+  scene.style.cssText = "width:100%;height:100%;position:fixed;inset:0;z-index:1";
+
+  // 画布纹理 - 用一个隐藏的 canvas 作为 texture
+  var drawCanvasEl = $("#draw-canvas");
+  var ctx = drawCanvasEl.getContext("2d");
+
+  function resizeCanvas(){
+    drawCanvasEl.width = window.innerWidth;
+    drawCanvasEl.height = window.innerHeight;
+    redrawAll();
+  }
+  resizeCanvas();
+  window.addEventListener("resize", resizeCanvas);
+
+  // 创建 marker 和画布 plane
+  var marker = document.createElement("a-marker");
+  marker.setAttribute("preset","hiro");
+  marker.setAttribute("id","hiro-marker");
+
+  // 虚拟画布 plane
+  var plane = document.createElement("a-plane");
+  plane.setAttribute("position","0 0 0");
+  plane.setAttribute("rotation","-90 0 0");
+  plane.setAttribute("width","4");
+  plane.setAttribute("height","3");
+  plane.setAttribute("material","color:#1a1a2e;opacity:0.3;transparent:true;side:double");
+  plane.setAttribute("id","draw-plane");
+  marker.appendChild(plane);
+
+  scene.appendChild(marker);
+
+  // 相机
+  var cam = document.createElement("a-entity");
+  cam.setAttribute("camera","");
+  scene.appendChild(cam);
+
+  // 挂载场景
+  var arContainer = $("#ar-container");
+  if(arContainer) arContainer.appendChild(scene);
+
+  nextStep(); // 初始化 AR
+
+  // 监听 marker 识别
+  marker.addEventListener("markerFound", function(){
+    state.markerFound = true;
+    drawCanvasEl.classList.add("active");
+  });
+  marker.addEventListener("markerLost", function(){
+    state.markerFound = false;
+    drawCanvasEl.classList.remove("active");
+  });
+
+  // 场景加载完毕
+  scene.addEventListener("loaded", function(){
+    nextStep(); // 请求摄像头
+    setTimeout(function(){
+      nextStep(); // 准备就绪
+      var lm = $("#loading-mask");
+      if(lm) lm.classList.add("fade-out");
+      setTimeout(function(){ if(lm) hideEl(lm); }, 600);
+      showEl($("#toolbar"));
+      showEl($("#info-panel"));
+    }, 2000);
+  });
+
+  // 场景渲染后重绘
+  scene.addEventListener("renderstart", function(){
+    resizeCanvas();
+  });
+
+  /* ===== 绘制逻辑 ===== */
+  function getPointerPos(e){
+    var rect = drawCanvasEl.getBoundingClientRect();
+    if(e.touches && e.touches.length > 0){
+      return { x: e.touches[0].clientX - rect.left, y: e.touches[0].clientY - rect.top };
+    }
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  }
+
+  function startDraw(e){
+    if(!state.markerFound) return;
+    e.preventDefault();
+    state.isDrawing = true;
+    var pos = getPointerPos(e);
+    state.currentStroke = {
+      shape: state.shape,
+      color: state.color,
+      size: state.brushSize,
+      start: pos,
+      end: pos,
+      points: [pos]
+    };
+  }
+
+  function moveDraw(e){
+    if(!state.isDrawing || !state.currentStroke) return;
+    e.preventDefault();
+    var pos = getPointerPos(e);
+    state.currentStroke.end = pos;
+    if(state.shape === "line"){
+      state.currentStroke.points.push(pos);
+    }
+    redrawAll();
+    drawPreview(state.currentStroke);
+  }
+
+  function endDraw(e){
+    if(!state.isDrawing) return;
+    e.preventDefault();
+    state.isDrawing = false;
+    if(state.currentStroke){
+      state.drawStrokes.push(state.currentStroke);
+      state.currentStroke = null;
+    }
+    redrawAll();
+  }
+
+  // 触摸事件
+  drawCanvasEl.addEventListener("touchstart", startDraw, {passive:false});
+  drawCanvasEl.addEventListener("touchmove", moveDraw, {passive:false});
+  drawCanvasEl.addEventListener("touchend", endDraw, {passive:false});
+  drawCanvasEl.addEventListener("touchcancel", endDraw, {passive:false});
+
+  // 鼠标事件
+  drawCanvasEl.addEventListener("mousedown", startDraw);
+  drawCanvasEl.addEventListener("mousemove", moveDraw);
+  drawCanvasEl.addEventListener("mouseup", endDraw);
+  drawCanvasEl.addEventListener("mouseleave", endDraw);
+
+  /* ===== 重绘所有笔画 ===== */
+  function redrawAll(){
+    ctx.clearRect(0, 0, drawCanvasEl.width, drawCanvasEl.height);
+    state.drawStrokes.forEach(function(s){ drawStroke(s, false); });
+  }
+
+  function drawPreview(stroke){
+    drawStroke(stroke, true);
+  }
+
+  function drawStroke(s, isPreview){
+    if(!s) return;
+    ctx.save();
+    ctx.strokeStyle = s.color;
+    ctx.fillStyle = s.color;
+    ctx.lineWidth = s.size;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.globalAlpha = isPreview ? 0.7 : 1;
+
+    if(s.shape === "line"){
+      if(s.points.length < 2){
+        // 单点画圆
+        ctx.beginPath();
+        ctx.arc(s.start.x, s.start.y, s.size/2, 0, Math.PI*2);
+        ctx.fill();
+      } else {
+        ctx.beginPath();
+        ctx.moveTo(s.points[0].x, s.points[0].y);
+        for(var i=1; i<s.points.length; i++){
+          ctx.lineTo(s.points[i].x, s.points[i].y);
+        }
+        ctx.stroke();
+      }
+    } else if(s.shape === "circle"){
+      var dx = s.end.x - s.start.x;
+      var dy = s.end.y - s.start.y;
+      var r = Math.sqrt(dx*dx + dy*dy);
+      ctx.beginPath();
+      ctx.arc(s.start.x, s.start.y, r, 0, Math.PI*2);
+      ctx.stroke();
+    } else if(s.shape === "rect"){
+      var rx = Math.min(s.start.x, s.end.x);
+      var ry = Math.min(s.start.y, s.end.y);
+      var rw = Math.abs(s.end.x - s.start.x);
+      var rh = Math.abs(s.end.y - s.start.y);
+      ctx.beginPath();
+      ctx.rect(rx, ry, rw, rh);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  /* ===== 清空 ===== */
+  var btnClear = $("#btn-clear");
+  if(btnClear){
+    btnClear.addEventListener("click", function(){
+      state.drawStrokes = [];
+      state.currentStroke = null;
+      redrawAll();
+    });
+  }
+
+  /* ===== 保存截图 ===== */
+  var btnSave = $("#btn-save");
+  if(btnSave){
+    btnSave.addEventListener("click", function(){
+      // 合并AR画面与涂鸦
+      var aScene = document.querySelector("a-scene");
+      if(!aScene) return;
+      try {
+        var arCanvas = aScene.canvas || aScene.renderer && aScene.renderer.domElement;
+        if(arCanvas){
+          var out = document.createElement("canvas");
+          out.width = arCanvas.width;
+          out.height = arCanvas.height;
+          var octx = out.getContext("2d");
+          octx.drawImage(arCanvas, 0, 0);
+          // 叠加涂鸦
+          octx.drawImage(drawCanvasEl, 0, 0, out.width, out.height);
+          var link = document.createElement("a");
+          link.download = "AR涂鸦_" + Date.now() + ".png";
+          link.href = out.toDataURL("image/png");
+          link.click();
+        }
+      } catch(ex){
+        // fallback: 只保存涂鸦画布
+        var link2 = document.createElement("a");
+        link2.download = "AR涂鸦_" + Date.now() + ".png";
+        link2.href = drawCanvasEl.toDataURL("image/png");
+        link2.click();
+      }
+    });
+  }
+
+  /* ===== 摄像头错误监听 ===== */
+  // 如果 A-Frame 内部获取摄像头失败，捕获 error
+  scene.addEventListener("camera-process-error", function(){
+    showError("摄像头访问失败", "请确保已授权摄像头权限，并且设备支持 WebRTC。如果使用了广告拦截器或隐私模式，请尝试关闭后刷新页面。");
+  });
+
+} catch(err) {
+  console.error("AR 涂鸦墙初始化失败:", err);
+  showError("初始化失败", "AR 涂鸦墙加载过程中出现问题：" + (err.message || "未知错误") + "。请刷新页面重试。");
+}
+
+})();
+</script>
+</body>
+</html>

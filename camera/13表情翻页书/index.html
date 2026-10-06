@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>表情翻页书</title>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/blazeface@0.0.7/dist/blazeface.js"></script>
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;background:#0a0a0a;color:#fff}
+
+/* ===== Loading ===== */
+#loading{position:fixed;inset:0;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#0a0a0a;transition:opacity .5s}
+#loading.hidden{opacity:0;pointer-events:none}
+#loading h2{font-size:1.4rem;margin-bottom:1rem;font-weight:300;letter-spacing:.1em}
+#loading .bar{width:200px;height:3px;background:#222;border-radius:2px;overflow:hidden}
+#loading .bar-fill{height:100%;width:0%;background:linear-gradient(90deg,#f7971e,#ffd200);transition:width .3s}
+#loading .status{margin-top:.8rem;font-size:.85rem;color:#888}
+
+/* ===== Camera Error ===== */
+#cam-error{position:fixed;inset:0;z-index:9998;display:none;flex-direction:column;align-items:center;justify-content:center;background:#0a0a0a;text-align:center;padding:2rem}
+#cam-error h3{font-size:1.2rem;margin-bottom:.8rem}
+#cam-error p{color:#aaa;margin-bottom:1.5rem;font-size:.9rem;max-width:320px;line-height:1.6}
+#cam-error button{padding:.6rem 1.8rem;border:1px solid #555;background:transparent;color:#fff;border-radius:6px;cursor:pointer;font-size:.9rem;transition:background .2s}
+#cam-error button:hover{background:#333}
+
+/* ===== Preview Window ===== */
+#preview-wrap{position:fixed;top:12px;left:12px;z-index:100;width:160px;height:120px;border-radius:10px;overflow:hidden;border:2px solid rgba(255,255,255,.15);background:#000}
+#preview-wrap video,#preview-wrap canvas{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover}
+#expression-label{position:fixed;top:138px;left:12px;z-index:100;font-size:.75rem;color:rgba(255,255,255,.6);background:rgba(0,0,0,.5);padding:3px 10px;border-radius:4px;backdrop-filter:blur(4px)}
+
+/* ===== Page Indicator ===== */
+#page-indicator{position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:100;font-size:.85rem;letter-spacing:.15em;color:rgba(255,255,255,.7);background:rgba(0,0,0,.35);padding:5px 16px;border-radius:20px;backdrop-filter:blur(4px)}
+
+/* ===== Pages ===== */
+#page-container{position:fixed;inset:0}
+.page{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;opacity:0;transform:scale(.92);transition:opacity .6s ease,transform .6s ease;pointer-events:none;overflow:hidden}
+.page.active{opacity:1;transform:scale(1);pointer-events:auto}
+.page h1{font-size:clamp(2rem,6vw,3.6rem);font-weight:700;margin-bottom:.5rem;text-align:center;z-index:2}
+.page h2{font-size:clamp(1rem,3vw,1.4rem);font-weight:300;opacity:.7;margin-bottom:2rem;z-index:2}
+.page .content-text{font-size:clamp(1.2rem,4vw,1.8rem);font-weight:400;z-index:2;text-align:center;padding:0 1rem;line-height:1.6}
+.page .hint{position:absolute;bottom:clamp(2rem,6vh,4rem);font-size:.8rem;color:rgba(255,255,255,.45);text-align:center;max-width:380px;line-height:1.7;z-index:2;padding:0 1rem}
+
+/* Cover */
+.page-cover{background:#0a0a0a}
+.page-cover h1{background:linear-gradient(135deg,#f7971e,#ffd200);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+
+/* Happy */
+.page-happy{background:linear-gradient(135deg,#f7971e,#ffd200)}
+.page-happy .emoji-rain{position:absolute;inset:0;overflow:hidden;pointer-events:none}
+.page-happy .emoji-rain span{position:absolute;animation:emojifall linear infinite}
+@keyframes emojifall{0%{transform:translateY(-10vh) rotate(0deg);opacity:.7}100%{transform:translateY(110vh) rotate(360deg);opacity:.3}}
+
+/* Surprise */
+.page-surprise{background:linear-gradient(135deg,#7b2ff7,#c471f5)}
+.page-surprise .stars{position:absolute;inset:0;overflow:hidden;pointer-events:none}
+.page-surprise .stars span{position:absolute;width:4px;height:4px;background:#fff;border-radius:50%;animation:twinkle ease-in-out infinite}
+@keyframes twinkle{0%,100%{opacity:.15;transform:scale(.6)}50%{opacity:1;transform:scale(1.5)}}
+
+/* Think */
+.page-think{background:linear-gradient(135deg,#0f3460,#16213e)}
+.page-think .float-q{position:absolute;inset:0;overflow:hidden;pointer-events:none}
+.page-think .float-q span{position:absolute;opacity:.12;animation:floatq ease-in-out infinite}
+@keyframes floatq{0%,100%{transform:translateY(0) rotate(-8deg)}50%{transform:translateY(-30px) rotate(8deg)}}
+
+/* Hidden */
+.page-hidden{background:#000}
+.page-hidden .fog{position:absolute;inset:0;overflow:hidden;pointer-events:none}
+.page-hidden .fog span{position:absolute;width:200%;height:200%;background:radial-gradient(ellipse at center,rgba(255,255,255,.035) 0%,transparent 70%);animation:fogmove linear infinite}
+@keyframes fogmove{0%{transform:translate(-30%,-30%)}50%{transform:translate(-20%,-40%)}100%{transform:translate(-30%,-30%)}}
+
+/* Reduced motion */
+@media(prefers-reduced-motion:reduce){
+  .page{transition:opacity .15s!important;transform:none!important}
+  .page.active{transform:none!important}
+  .page-happy .emoji-rain span,
+  .page-surprise .stars span,
+  .page-think .float-q span,
+  .page-hidden .fog span{animation:none!important}
+}
+
+/* Print */
+@media print{
+  #preview-wrap,#expression-label,#page-indicator,#loading,#cam-error{display:none!important}
+  .page{position:relative!important;opacity:1!important;transform:none!important;page-break-after:always;min-height:100vh;pointer-events:auto!important}
+}
+
+/* Mobile */
+@media(max-width:600px){
+  #preview-wrap{width:100px;height:75px;top:8px;left:8px}
+  #expression-label{top:89px;left:8px;font-size:.65rem}
+  #page-indicator{font-size:.7rem;top:10px;padding:4px 12px}
+}
+</style>
+</head>
+<body>
+
+<!-- Loading Screen -->
+<div id="loading">
+  <h2>表情翻页书</h2>
+  <div class="bar"><div class="bar-fill" id="load-bar"></div></div>
+  <p class="status" id="load-status">正在初始化…</p>
+</div>
+
+<!-- Camera Error -->
+<div id="cam-error">
+  <h3>📷 摄像头无法启动</h3>
+  <p>请确保已授权摄像头权限，并且设备支持摄像头访问。<br>建议使用 HTTPS 环境。</p>
+  <button id="retry-btn">重试</button>
+</div>
+
+<!-- Preview -->
+<div id="preview-wrap">
+  <video id="video" autoplay playsinline muted></video>
+  <canvas id="overlay"></canvas>
+</div>
+<div id="expression-label">检测中…</div>
+<div id="page-indicator">封面</div>
+
+<!-- Pages -->
+<div id="page-container">
+  <section class="page page-cover active" data-name="封面">
+    <h1>表情翻页书</h1>
+    <h2>你的表情打开不同世界</h2>
+    <p class="hint">用表情翻页：微笑、惊讶、皱眉、遮挡镜头，都会打开不同页面。<br>光线充足时识别更稳定。</p>
+  </section>
+  <section class="page page-happy" data-name="快乐">
+    <div class="emoji-rain" id="emoji-rain"></div>
+    <p class="content-text">☀️ 今天也要开心呀！</p>
+  </section>
+  <section class="page page-surprise" data-name="惊喜">
+    <div class="stars" id="stars"></div>
+    <p class="content-text">✨ 哇，发现你了！</p>
+  </section>
+  <section class="page page-think" data-name="思考">
+    <div class="float-q" id="float-q"></div>
+    <p class="content-text">🤔 静下来，想点什么？</p>
+  </section>
+  <section class="page page-hidden" data-name="隐藏">
+    <div class="fog" id="fog"></div>
+    <p class="content-text">👻 你藏起来了…</p>
+  </section>
+</div>
+
+<script>
+(function () {
+try {
+
+/* ===== Constants ===== */
+var PAGE_NAMES = { cover:'封面', happy:'快乐', surprise:'惊喜', think:'思考', hidden:'隐藏' };
+var DEBOUNCE = 5;
+
+/* ===== State ===== */
+var model = null;
+var currentPage = 'cover';
+var expressionBuffer = [];
+
+/* ===== DOM ===== */
+var $loading     = document.getElementById('loading');
+var $loadBar     = document.getElementById('load-bar');
+var $loadStatus  = document.getElementById('load-status');
+var $camError    = document.getElementById('cam-error');
+var $retryBtn    = document.getElementById('retry-btn');
+var $exprLabel   = document.getElementById('expression-label');
+var $pageInd     = document.getElementById('page-indicator');
+var $pages       = document.querySelectorAll('.page');
+
+/* ===== Populate animated elements ===== */
+function populateAnimations() {
+  var emojis = ['☀️','😊','🌻','🌈','💛','😄','🎉','🌟'];
+  var rain = document.getElementById('emoji-rain');
+  for (var i = 0; i < 20; i++) {
+    var s = document.createElement('span');
+    s.textContent = emojis[i % emojis.length];
+    s.style.left = (Math.random() * 100) + '%';
+    s.style.animationDuration = (4 + Math.random() * 6) + 's';
+    s.style.animationDelay = (-Math.random() * 8) + 's';
+    s.style.fontSize = (1.2 + Math.random() * 1.5) + 'rem';
+    rain.appendChild(s);
+  }
+
+  var starsEl = document.getElementById('stars');
+  for (var i = 0; i < 50; i++) {
+    var s = document.createElement('span');
+    s.style.left = (Math.random() * 100) + '%';
+    s.style.top = (Math.random() * 100) + '%';
+    s.style.animationDuration = (1.5 + Math.random() * 2) + 's';
+    s.style.animationDelay = (-Math.random() * 3) + 's';
+    var size = (2 + Math.random() * 4) + 'px';
+    s.style.width = size;
+    s.style.height = size;
+    starsEl.appendChild(s);
+  }
+
+  var fq = document.getElementById('float-q');
+  for (var i = 0; i < 12; i++) {
+    var s = document.createElement('span');
+    s.textContent = '?';
+    s.style.left = (Math.random() * 90) + '%';
+    s.style.top = (Math.random() * 90) + '%';
+    s.style.animationDuration = (3 + Math.random() * 4) + 's';
+    s.style.animationDelay = (-Math.random() * 5) + 's';
+    s.style.fontSize = (1.5 + Math.random() * 2) + 'rem';
+    s.style.color = '#fff';
+    fq.appendChild(s);
+  }
+
+  var fogEl = document.getElementById('fog');
+  for (var i = 0; i < 5; i++) {
+    var s = document.createElement('span');
+    s.style.left = (-30 + Math.random() * 20) + '%';
+    s.style.top = (-30 + Math.random() * 20) + '%';
+    s.style.animationDuration = (8 + Math.random() * 6) + 's';
+    s.style.animationDelay = (-Math.random() * 8) + 's';
+    fogEl.appendChild(s);
+  }
+}
+
+/* ===== Page switching ===== */
+function switchTo(name) {
+  if (name === currentPage) return;
+  for (var i = 0; i < $pages.length; i++) {
+    var p = $pages[i];
+    if (p.dataset.name === PAGE_NAMES[name]) {
+      p.classList.add('active');
+    } else {
+      p.classList.remove('active');
+    }
+  }
+  $pageInd.textContent = PAGE_NAMES[name];
+  currentPage = name;
+}
+
+/* ===== Expression detection from BlazeFace landmarks ===== */
+function detectExpression(faces) {
+  if (!faces || faces.length === 0) return 'no_face';
+
+  var f = faces[0];
+  var lm = f.landmarks;
+  // BlazeFace landmark indices:
+  // 0: right eye, 1: left eye, 2: nose tip, 3: mouth center, 4: right ear, 5: left ear
+  var rEye  = lm[0];
+  var lEye  = lm[1];
+  var nose  = lm[2];
+  var mouth = lm[3];
+
+  // Very low confidence → covered
+  if (f.probability < 0.3) return 'covered';
+
+  // Eye distance (reference scale)
+  var eyeDist = dist(rEye, lEye);
+  if (eyeDist < 5) return 'covered';
+
+  // Mouth-to-nose vertical distance (mouth openness indicator)
+  var mouthNoseY = Math.abs(mouth[1] - nose[1]);
+  var mouthOpenRatio = mouthNoseY / eyeDist;
+
+  // Mouth horizontal width (approximate via ear-to-ear ratio)
+  var earDist = dist(lm[4], lm[5]);
+  var mouthWidth = mouth[0] ? Math.abs((lm[4][0] + lm[5][0]) / 2 - mouth[0]) : 0;
+  var mouthAspect = mouthWidth / eyeDist;
+
+  // Surprise: mouth wide open
+  if (mouthOpenRatio > 0.75) return 'surprise';
+
+  // Smile: mouth relatively narrow but wide aspect, mouth close to nose
+  if (mouthOpenRatio < 0.5 && mouthAspect > 0.6) return 'happy';
+
+  // Frown / thinking: mouth narrow and tight
+  if (mouthOpenRatio < 0.35 && mouthAspect < 0.5) return 'think';
+
+  return 'neutral';
+}
+
+function dist(a, b) {
+  return Math.sqrt((a[0] - b[0]) * (a[0] - b[0]) + (a[1] - b[1]) * (a[1] - b[1]));
+}
+
+/* ===== Map expression → page ===== */
+function expressionToPage(expr) {
+  switch (expr) {
+    case 'happy':    return 'happy';
+    case 'surprise': return 'surprise';
+    case 'think':    return 'think';
+    case 'covered':  return 'hidden';
+    default:         return 'cover';
+  }
+}
+
+var EXPR_LABELS = {
+  happy:    '微笑 😊',
+  surprise: '惊讶 😮',
+  think:    '皱眉 🤔',
+  covered:  '遮挡 🙈',
+  neutral:  '平静 😐',
+  no_face:  '未检测到'
+};
+
+/* ===== Detection loop ===== */
+var video, overlay, overlayCtx;
+var animFrame;
+
+async function detectLoop() {
+  if (!model) {
+    animFrame = requestAnimationFrame(detectLoop);
+    return;
+  }
+  try {
+    var faces = await model.estimateFaces(video, false);
+
+    // Draw overlay
+    overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
+    if (faces.length > 0) {
+      var f = faces[0];
+      var bb = f.topLeft;
+      var br = f.bottomRight;
+      overlayCtx.strokeStyle = 'rgba(255,255,255,0.7)';
+      overlayCtx.lineWidth = 2;
+      overlayCtx.strokeRect(bb[0], bb[1], br[0] - bb[0], br[1] - bb[1]);
+      f.landmarks.forEach(function (lm) {
+        overlayCtx.fillStyle = 'rgba(255,200,0,0.8)';
+        overlayCtx.beginPath();
+        overlayCtx.arc(lm[0], lm[1], 3, 0, Math.PI * 2);
+        overlayCtx.fill();
+      });
+    }
+
+    var expr = detectExpression(faces);
+    $exprLabel.textContent = EXPR_LABELS[expr] || '检测中…';
+
+    // Debounce: need DEBOUNCE consecutive same expressions
+    expressionBuffer.push(expr);
+    if (expressionBuffer.length > DEBOUNCE) expressionBuffer.shift();
+
+    if (expressionBuffer.length >= DEBOUNCE) {
+      var last = expressionBuffer[expressionBuffer.length - 1];
+      var allSame = true;
+      for (var i = 0; i < expressionBuffer.length; i++) {
+        if (expressionBuffer[i] !== last) { allSame = false; break; }
+      }
+      if (allSame) {
+        var target = expressionToPage(last);
+        switchTo(target);
+      }
+    }
+  } catch (e) {
+    // Silently continue on detection errors
+  }
+
+  animFrame = requestAnimationFrame(detectLoop);
+}
+
+/* ===== Camera setup ===== */
+async function setupCamera() {
+  video = document.getElementById('video');
+  overlay = document.getElementById('overlay');
+  overlayCtx = overlay.getContext('2d');
+
+  var stream = await navigator.mediaDevices.getUserMedia({
+    video: { facingMode: 'user', width: { ideal: 320 }, height: { ideal: 240 } },
+    audio: false
+  });
+  video.srcObject = stream;
+  await new Promise(function (r) { video.onloadedmetadata = r; });
+  await video.play();
+  overlay.width = video.videoWidth || 320;
+  overlay.height = video.videoHeight || 240;
+}
+
+/* ===== Init ===== */
+async function init() {
+  $loadStatus.textContent = '正在加载模型…';
+  $loadBar.style.width = '20%';
+
+  populateAnimations();
+
+  // Step 1: Camera
+  try {
+    await setupCamera();
+  } catch (e) {
+    console.error('Camera error:', e);
+    $loading.classList.add('hidden');
+    $camError.style.display = 'flex';
+    return;
+  }
+
+  $loadBar.style.width = '50%';
+  $loadStatus.textContent = '正在加载 AI 模型…';
+
+  // Step 2: Model
+  try {
+    model = await blazeface.load();
+  } catch (e) {
+    console.error('Model error:', e);
+    $loadStatus.textContent = '模型加载失败，请刷新重试';
+    $loadBar.style.width = '100%';
+    $loadBar.style.background = '#e74c3c';
+    return;
+  }
+
+  $loadBar.style.width = '100%';
+  $loadStatus.textContent = '准备就绪！';
+
+  setTimeout(function () { $loading.classList.add('hidden'); }, 600);
+
+  detectLoop();
+}
+
+$retryBtn.addEventListener('click', function () {
+  $camError.style.display = 'none';
+  $loading.classList.remove('hidden');
+  $loadBar.style.width = '0%';
+  $loadBar.style.background = 'linear-gradient(90deg,#f7971e,#ffd200)';
+  init();
+});
+
+init();
+
+} catch (e) {
+  console.error('Fatal error:', e);
+}
+})();
+</script>
+</body>
+</html>

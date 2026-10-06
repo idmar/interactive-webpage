@@ -1,0 +1,608 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>隔空画笔 - HSV 颜色追踪</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0f0f13;--surface:#1a1a24;--surface2:#24243a;--border:#2e2e48;
+  --text:#e8e8f0;--text2:#a0a0b8;--accent:#ff4060;--radius:12px;
+  --green:#22c55e;--blue:#3b82f6;--yellow:#eab308;--purple:#a855f7;--orange:#f97316;
+}
+html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--text);overflow-x:hidden}
+body{display:flex;flex-direction:column;min-height:100vh}
+
+/* Header */
+.header{text-align:center;padding:20px 16px 12px}
+.header h1{font-size:1.6rem;font-weight:700;letter-spacing:2px;background:linear-gradient(135deg,#ff4060,#ff8040,#ffcc00);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.header p{font-size:.85rem;color:var(--text2);margin-top:4px;letter-spacing:1px}
+
+/* Main layout */
+.main{display:flex;gap:16px;padding:0 16px 16px;flex:1;min-height:0}
+.viewport-wrap{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;min-width:0}
+.viewport{position:relative;width:100%;max-width:800px;aspect-ratio:4/3;border-radius:var(--radius);overflow:hidden;background:#000;box-shadow:0 4px 24px rgba(0,0,0,.5)}
+.viewport video,.viewport canvas{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover}
+.viewport canvas{z-index:2}
+.viewport .hint-overlay{position:absolute;bottom:12px;left:50%;transform:translateX(-50%);z-index:3;background:rgba(0,0,0,.6);color:var(--text2);font-size:.75rem;padding:6px 14px;border-radius:20px;white-space:nowrap;pointer-events:none}
+
+/* Loading overlay */
+.loading-overlay{position:absolute;inset:0;z-index:10;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(15,15,19,.92);gap:12px;transition:opacity .4s}
+.loading-overlay.hidden{opacity:0;pointer-events:none}
+.spinner{width:36px;height:36px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.loading-text{color:var(--text2);font-size:.9rem}
+.error-text{color:#ef4444;font-size:.9rem;text-align:center;max-width:280px;line-height:1.5}
+.retry-btn{margin-top:8px;padding:8px 20px;border:none;border-radius:8px;background:var(--accent);color:#fff;font-size:.85rem;cursor:pointer;transition:background .2s}
+.retry-btn:hover{background:#e0304a}
+
+/* Control panel */
+.panel{width:280px;flex-shrink:0;background:var(--surface);border-radius:var(--radius);padding:20px;display:flex;flex-direction:column;gap:18px;overflow-y:auto;max-height:calc(100vh - 120px);border:1px solid var(--border)}
+.panel-section{display:flex;flex-direction:column;gap:8px}
+.panel-label{font-size:.75rem;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:1px}
+
+/* Color presets */
+.color-presets{display:flex;gap:8px;flex-wrap:wrap}
+.color-btn{width:36px;height:36px;border-radius:50%;border:3px solid transparent;cursor:pointer;transition:border-color .2s,transform .15s}
+.color-btn:hover{transform:scale(1.1)}
+.color-btn.active{border-color:#fff;box-shadow:0 0 12px rgba(255,255,255,.3)}
+.color-btn[data-color="red"]{background:#ef4444}
+.color-btn[data-color="blue"]{background:#3b82f6}
+.color-btn[data-color="green"]{background:#22c55e}
+.color-btn[data-color="yellow"]{background:#eab308}
+.color-btn[data-color="purple"]{background:#a855f7}
+.color-btn[data-color="orange"]{background:#f97316}
+.custom-color-wrap{display:flex;align-items:center;gap:8px}
+.custom-color-wrap input[type="color"]{width:36px;height:36px;border:none;border-radius:50%;cursor:pointer;background:none;padding:0}
+.custom-color-wrap input[type="color"]::-webkit-color-swatch-wrapper{padding:0}
+.custom-color-wrap input[type="color"]::-webkit-color-swatch{border:2px solid var(--border);border-radius:50%}
+.custom-color-wrap span{font-size:.75rem;color:var(--text2)}
+
+/* Sliders */
+.slider-group{display:flex;flex-direction:column;gap:4px}
+.slider-row{display:flex;align-items:center;gap:8px}
+.slider-row label{font-size:.78rem;color:var(--text2);min-width:60px}
+.slider-row input[type="range"]{flex:1;height:6px;-webkit-appearance:none;appearance:none;background:var(--surface2);border-radius:3px;outline:none}
+.slider-row input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;background:var(--accent);cursor:pointer;border:none}
+.slider-row .val{font-size:.75rem;color:var(--text);min-width:28px;text-align:right;font-variant-numeric:tabular-nums}
+
+/* Buttons */
+.btn-group{display:flex;gap:8px}
+.btn{flex:1;padding:10px 0;border:none;border-radius:8px;font-size:.82rem;font-weight:600;cursor:pointer;transition:background .2s,transform .1s}
+.btn:active{transform:scale(.97)}
+.btn-clear{background:var(--surface2);color:var(--text)}
+.btn-clear:hover{background:var(--border)}
+.btn-save{background:var(--accent);color:#fff}
+.btn-save:hover{background:#e0304a}
+
+/* Detection indicator */
+.detect-indicator{display:flex;align-items:center;gap:6px;font-size:.78rem;color:var(--text2)}
+.detect-dot{width:8px;height:8px;border-radius:50%;background:#555;transition:background .2s}
+.detect-dot.active{background:var(--green);box-shadow:0 0 8px rgba(34,197,94,.5)}
+
+/* Responsive */
+@media(max-width:768px){
+  .main{flex-direction:column}
+  .panel{width:100%;max-height:none;flex-shrink:1}
+  .viewport{max-width:100%}
+}
+
+/* Reduced motion */
+@media(prefers-reduced-motion:reduce){
+  .spinner{animation:none;border-top-color:transparent}
+  *{transition-duration:0s!important;animation-duration:0s!important}
+}
+
+/* Print */
+@media print{
+  body{background:#fff;color:#000}
+  .panel,.header p,.hint-overlay,.loading-overlay{display:none!important}
+  .viewport{box-shadow:none;border:1px solid #ccc}
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>隔空画笔</h1>
+  <p>HSV 颜色追踪 · 无 AI · 低延迟</p>
+</div>
+
+<div class="main">
+  <div class="viewport-wrap">
+    <div class="viewport" id="viewport">
+      <video id="video" autoplay playsinline muted></video>
+      <canvas id="drawCanvas"></canvas>
+      <div class="hint-overlay">拿一个彩色物体在镜头前移动，在空中画画！选择颜色鲜艳的物品，背景不要同色。</div>
+      <div class="loading-overlay" id="loadingOverlay">
+        <div class="spinner" id="spinner"></div>
+        <div class="loading-text" id="loadingText">正在请求摄像头权限…</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-section">
+      <div class="panel-label">追踪颜色</div>
+      <div class="color-presets" id="colorPresets">
+        <button class="color-btn active" data-color="red" title="红色"></button>
+        <button class="color-btn" data-color="blue" title="蓝色"></button>
+        <button class="color-btn" data-color="green" title="绿色"></button>
+        <button class="color-btn" data-color="yellow" title="黄色"></button>
+        <button class="color-btn" data-color="purple" title="紫色"></button>
+        <button class="color-btn" data-color="orange" title="橙色"></button>
+      </div>
+      <div class="custom-color-wrap">
+        <input type="color" id="customColor" value="#ff0000" title="自定义颜色">
+        <span>自定义吸取</span>
+      </div>
+    </div>
+
+    <div class="panel-section">
+      <div class="panel-label">笔触粗细</div>
+      <div class="slider-row">
+        <label>宽度</label>
+        <input type="range" id="brushSize" min="2" max="30" value="8">
+        <span class="val" id="brushSizeVal">8</span>
+      </div>
+    </div>
+
+    <div class="panel-section">
+      <div class="panel-label">HSV 微调</div>
+      <div class="slider-row">
+        <label>H 下限</label>
+        <input type="range" id="hMin" min="0" max="180" value="0">
+        <span class="val" id="hMinVal">0</span>
+      </div>
+      <div class="slider-row">
+        <label>H 上限</label>
+        <input type="range" id="hMax" min="0" max="180" value="15">
+        <span class="val" id="hMaxVal">15</span>
+      </div>
+      <div class="slider-row">
+        <label>S 下限%</label>
+        <input type="range" id="sMin" min="0" max="100" value="30">
+        <span class="val" id="sMinVal">30</span>
+      </div>
+      <div class="slider-row">
+        <label>V 下限%</label>
+        <input type="range" id="vMin" min="0" max="100" value="30">
+        <span class="val" id="vMinVal">30</span>
+      </div>
+    </div>
+
+    <div class="panel-section">
+      <div class="panel-label">检测状态</div>
+      <div class="detect-indicator">
+        <div class="detect-dot" id="detectDot"></div>
+        <span id="detectText">未检测到</span>
+      </div>
+    </div>
+
+    <div class="panel-section">
+      <div class="btn-group">
+        <button class="btn btn-clear" id="btnClear">清空画布</button>
+        <button class="btn btn-save" id="btnSave">保存画作</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+"use strict";
+try{
+
+/* ── DOM refs ── */
+var video = document.getElementById('video');
+var drawCanvas = document.getElementById('drawCanvas');
+var viewport = document.getElementById('viewport');
+var loadingOverlay = document.getElementById('loadingOverlay');
+var loadingText = document.getElementById('loadingText');
+var spinner = document.getElementById('spinner');
+var detectDot = document.getElementById('detectDot');
+var detectText = document.getElementById('detectText');
+var customColorInput = document.getElementById('customColor');
+var brushSizeSlider = document.getElementById('brushSize');
+var brushSizeVal = document.getElementById('brushSizeVal');
+var hMinSlider = document.getElementById('hMin');
+var hMaxSlider = document.getElementById('hMax');
+var sMinSlider = document.getElementById('sMin');
+var vMinSlider = document.getElementById('vMin');
+var hMinVal = document.getElementById('hMinVal');
+var hMaxVal = document.getElementById('hMaxVal');
+var sMinVal = document.getElementById('sMinVal');
+var vMinVal = document.getElementById('vMinVal');
+var btnClear = document.getElementById('btnClear');
+var btnSave = document.getElementById('btnSave');
+var colorPresets = document.getElementById('colorPresets');
+
+/* ── Processing canvas (offscreen, downsampled) ── */
+var PROC_W = 320, PROC_H = 240;
+var procCanvas = document.createElement('canvas');
+procCanvas.width = PROC_W;
+procCanvas.height = PROC_H;
+var procCtx = procCanvas.getContext('2d', {willReadFrequently: true});
+
+/* ── State ── */
+var hsvRange = {hMin:0, hMax:15, sMin:30, vMin:30};
+var brushSize = 8;
+var brushColor = '#ff0000';
+var lastCentroid = null;
+var isRunning = false;
+var animFrameId = null;
+var lastFrameTime = 0;
+var TARGET_FPS = 30;
+var FRAME_INTERVAL = 1000 / TARGET_FPS;
+var PIXEL_THRESHOLD = 200;
+var reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* ── Color presets: H range in 0-180 (OpenCV-like scale) ── */
+var COLOR_MAP = {
+  red:    {hMin:0,   hMax:10,  css:'#ef4444'},
+  blue:   {hMin:100, hMax:130, css:'#3b82f6'},
+  green:  {hMin:35,  hMax:85,  css:'#22c55e'},
+  yellow: {hMin:15,  hMax:35,  css:'#eab308'},
+  purple: {hMin:130, hMax:170, css:'#a855f7'},
+  orange: {hMin:5,   hMax:20,  css:'#f97316'}
+};
+
+/* ── RGB→HSV (returns h:0-180, s:0-100, v:0-100) ── */
+function rgbToHsv(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  var max = Math.max(r, g, b), min = Math.min(r, g, b);
+  var d = max - min;
+  var h = 0, s = (max === 0 ? 0 : d / max), v = max;
+  if (d !== 0) {
+    if (max === r) h = ((g - b) / d) % 6;
+    else if (max === g) h = (b - r) / d + 2;
+    else h = (r - g) / d + 4;
+    h *= 60;
+    if (h < 0) h += 360;
+  }
+  // Scale H to 0-180 range
+  h = h / 2;
+  s = s * 100;
+  v = v * 100;
+  return [h, s, v];
+}
+
+/* ── CSS hex to RGB ── */
+function hexToRgb(hex) {
+  hex = hex.replace('#','');
+  if(hex.length===3) hex = hex[0]+hex[0]+hex[1]+hex[1]+hex[2]+hex[2];
+  var n = parseInt(hex, 16);
+  return [(n>>16)&255, (n>>8)&255, n&255];
+}
+
+/* ── CSS hex to HSV (for custom color picker) ── */
+function hexToHsv(hex) {
+  var rgb = hexToRgb(hex);
+  return rgbToHsv(rgb[0], rgb[1], rgb[2]);
+}
+
+/* ── Set color preset ── */
+function setColor(name) {
+  var c = COLOR_MAP[name];
+  if (!c) return;
+  brushColor = c.css;
+  hsvRange.hMin = c.hMin;
+  hsvRange.hMax = c.hMax;
+  hsvRange.sMin = 30;
+  hsvRange.vMin = 30;
+  // Update sliders
+  hMinSlider.value = c.hMin; hMinVal.textContent = c.hMin;
+  hMaxSlider.value = c.hMax; hMaxVal.textContent = c.hMax;
+  sMinSlider.value = 30; sMinVal.textContent = 30;
+  vMinSlider.value = 30; vMinVal.textContent = 30;
+  // Update active button
+  var btns = colorPresets.querySelectorAll('.color-btn');
+  for (var i = 0; i < btns.length; i++) {
+    btns[i].classList.toggle('active', btns[i].getAttribute('data-color') === name);
+  }
+  lastCentroid = null;
+}
+
+/* ── Setup draw canvas size ── */
+function setupCanvas() {
+  var rect = viewport.getBoundingClientRect();
+  drawCanvas.width = rect.width;
+  drawCanvas.height = rect.height;
+  var ctx = drawCanvas.getContext('2d');
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+}
+
+/* ── Process frame & find centroid ── */
+function processFrame() {
+  // Draw video frame to processing canvas (downsampled)
+  procCtx.drawImage(video, 0, 0, PROC_W, PROC_H);
+  var imageData = procCtx.getImageData(0, 0, PROC_W, PROC_H);
+  var data = imageData.data;
+  var len = data.length;
+
+  var sumX = 0, sumY = 0, count = 0;
+  var hMin = hsvRange.hMin, hMax = hsvRange.hMax;
+  var sMin = hsvRange.sMin, vMin = hsvRange.vMin;
+
+  // Process every pixel (already downsampled to 320x240)
+  for (var i = 0; i < len; i += 4) {
+    var r = data[i], g = data[i+1], b = data[i+2];
+    var hsv = rgbToHsv(r, g, b);
+    var h = hsv[0], s = hsv[1], v = hsv[2];
+
+    // Check if h is in range (handle wrap for red)
+    var hInRange;
+    if (hMin <= hMax) {
+      hInRange = (h >= hMin && h <= hMax);
+    } else {
+      hInRange = (h >= hMin || h <= hMax);
+    }
+
+    if (hInRange && s >= sMin && v >= vMin) {
+      var pixelIdx = i / 4;
+      var px = pixelIdx % PROC_W;
+      var py = Math.floor(pixelIdx / PROC_W);
+      sumX += px;
+      sumY += py;
+      count++;
+    }
+  }
+
+  if (count > PIXEL_THRESHOLD) {
+    var cx = sumX / count;
+    var cy = sumY / count;
+    // Map from proc coordinates to canvas coordinates
+    var scaleX = drawCanvas.width / PROC_W;
+    var scaleY = drawCanvas.height / PROC_H;
+    return {x: cx * scaleX, y: cy * scaleY, count: count};
+  }
+  return null;
+}
+
+/* ── Draw on canvas ── */
+function drawStroke(centroid) {
+  if (!centroid) return;
+  var ctx = drawCanvas.getContext('2d');
+  ctx.strokeStyle = brushColor;
+  ctx.lineWidth = brushSize;
+
+  if (lastCentroid) {
+    ctx.beginPath();
+    ctx.moveTo(lastCentroid.x, lastCentroid.y);
+    ctx.lineTo(centroid.x, centroid.y);
+    ctx.stroke();
+  } else {
+    // Single dot
+    ctx.beginPath();
+    ctx.arc(centroid.x, centroid.y, brushSize / 2, 0, Math.PI * 2);
+    ctx.fillStyle = brushColor;
+    ctx.fill();
+  }
+  lastCentroid = centroid;
+}
+
+/* ── Animation loop ── */
+function loop(timestamp) {
+  if (!isRunning) return;
+  animFrameId = requestAnimationFrame(loop);
+
+  // Throttle to target FPS
+  var delta = timestamp - lastFrameTime;
+  if (delta < FRAME_INTERVAL) return;
+  lastFrameTime = timestamp - (delta % FRAME_INTERVAL);
+
+  if (video.readyState < 2) return;
+
+  var centroid = processFrame();
+
+  if (centroid) {
+    drawStroke(centroid);
+    detectDot.classList.add('active');
+    detectText.textContent = '检测中 (' + centroid.count + 'px)';
+  } else {
+    lastCentroid = null;
+    detectDot.classList.remove('active');
+    detectText.textContent = '未检测到';
+  }
+}
+
+/* ── Start camera ── */
+function startCamera() {
+  loadingOverlay.classList.remove('hidden');
+  spinner.style.display = '';
+  loadingText.textContent = '正在请求摄像头权限…';
+  loadingText.className = 'loading-text';
+  // Remove retry button if exists
+  var existingRetry = loadingOverlay.querySelector('.retry-btn');
+  if (existingRetry) existingRetry.remove();
+
+  var constraints = {video: {facingMode: 'user', width: {ideal: 640}, height: {ideal: 480}}, audio: false};
+
+  navigator.mediaDevices.getUserMedia(constraints)
+    .then(function(stream) {
+      video.srcObject = stream;
+      loadingText.textContent = '准备就绪，启动中…';
+      video.onloadedmetadata = function() {
+        video.play().then(function() {
+          setupCanvas();
+          loadingOverlay.classList.add('hidden');
+          isRunning = true;
+          lastFrameTime = 0;
+          animFrameId = requestAnimationFrame(loop);
+        }).catch(function(e) {
+          showError('视频播放失败: ' + e.message);
+        });
+      };
+    })
+    .catch(function(err) {
+      var msg = '';
+      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+        msg = '摄像头权限被拒绝。请在浏览器设置中允许访问摄像头，然后点击重试。';
+      } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+        msg = '未检测到摄像头设备，请确认已连接摄像头。';
+      } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
+        msg = '摄像头被其他程序占用，请关闭后重试。';
+      } else {
+        msg = '摄像头访问失败: ' + err.message;
+      }
+      showError(msg);
+    });
+}
+
+function showError(msg) {
+  spinner.style.display = 'none';
+  loadingText.textContent = msg;
+  loadingText.className = 'error-text';
+  var btn = document.createElement('button');
+  btn.className = 'retry-btn';
+  btn.textContent = '重试';
+  btn.onclick = function() { startCamera(); };
+  loadingOverlay.appendChild(btn);
+}
+
+/* ── Clear canvas ── */
+btnClear.addEventListener('click', function() {
+  var ctx = drawCanvas.getContext('2d');
+  ctx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
+  lastCentroid = null;
+});
+
+/* ── Save composite ── */
+btnSave.addEventListener('click', function() {
+  var w = drawCanvas.width, h = drawCanvas.height;
+  var tmpCanvas = document.createElement('canvas');
+  tmpCanvas.width = w;
+  tmpCanvas.height = h;
+  var tmpCtx = tmpCanvas.getContext('2d');
+  // Draw video frame
+  tmpCtx.drawImage(video, 0, 0, w, h);
+  // Draw drawing canvas on top
+  tmpCtx.drawImage(drawCanvas, 0, 0);
+  // Download
+  tmpCanvas.toBlob(function(blob) {
+    if (!blob) return;
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = '隔空画笔_' + Date.now() + '.png';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function() { URL.revokeObjectURL(url); }, 100);
+  }, 'image/png');
+});
+
+/* ── Color preset buttons ── */
+colorPresets.addEventListener('click', function(e) {
+  var btn = e.target.closest('.color-btn');
+  if (!btn) return;
+  setColor(btn.getAttribute('data-color'));
+});
+
+/* ── Custom color picker ── */
+customColorInput.addEventListener('input', function() {
+  var hex = this.value;
+  brushColor = hex;
+  var hsv = hexToHsv(hex);
+  var h = hsv[0], s = hsv[1], v = hsv[2];
+  // Set range around detected hue
+  var hRange = 15;
+  hsvRange.hMin = Math.max(0, Math.round(h - hRange));
+  hsvRange.hMax = Math.min(180, Math.round(h + hRange));
+  hsvRange.sMin = Math.max(0, Math.round(s * 0.5));
+  hsvRange.vMin = Math.max(0, Math.round(v * 0.3));
+  // Update sliders
+  hMinSlider.value = hsvRange.hMin; hMinVal.textContent = hsvRange.hMin;
+  hMaxSlider.value = hsvRange.hMax; hMaxVal.textContent = hsvRange.hMax;
+  sMinSlider.value = hsvRange.sMin; sMinVal.textContent = hsvRange.sMin;
+  vMinSlider.value = hsvRange.vMin; vMinVal.textContent = hsvRange.vMin;
+  // Deselect presets
+  var btns = colorPresets.querySelectorAll('.color-btn');
+  for (var i = 0; i < btns.length; i++) btns[i].classList.remove('active');
+  lastCentroid = null;
+});
+
+/* ── Brush size slider ── */
+brushSizeSlider.addEventListener('input', function() {
+  brushSize = parseInt(this.value, 10);
+  brushSizeVal.textContent = brushSize;
+});
+
+/* ── HSV sliders ── */
+hMinSlider.addEventListener('input', function() {
+  hsvRange.hMin = parseInt(this.value, 10);
+  hMinVal.textContent = hsvRange.hMin;
+  lastCentroid = null;
+});
+hMaxSlider.addEventListener('input', function() {
+  hsvRange.hMax = parseInt(this.value, 10);
+  hMaxVal.textContent = hsvRange.hMax;
+  lastCentroid = null;
+});
+sMinSlider.addEventListener('input', function() {
+  hsvRange.sMin = parseInt(this.value, 10);
+  sMinVal.textContent = hsvRange.sMin;
+  lastCentroid = null;
+});
+vMinSlider.addEventListener('input', function() {
+  hsvRange.vMin = parseInt(this.value, 10);
+  vMinVal.textContent = hsvRange.vMin;
+  lastCentroid = null;
+});
+
+/* ── Window resize ── */
+var resizeTimer;
+window.addEventListener('resize', function() {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(function() {
+    // Save current drawing
+    var tmpCanvas = document.createElement('canvas');
+    tmpCanvas.width = drawCanvas.width;
+    tmpCanvas.height = drawCanvas.height;
+    var tmpCtx = tmpCanvas.getContext('2d');
+    tmpCtx.drawImage(drawCanvas, 0, 0);
+    // Resize
+    setupCanvas();
+    // Restore drawing (scaled)
+    var ctx = drawCanvas.getContext('2d');
+    ctx.drawImage(tmpCanvas, 0, 0, drawCanvas.width, drawCanvas.height);
+    lastCentroid = null;
+  }, 200);
+});
+
+/* ── Visibility change: pause/resume ── */
+document.addEventListener('visibilitychange', function() {
+  if (document.hidden) {
+    isRunning = false;
+    if (animFrameId) cancelAnimationFrame(animFrameId);
+  } else if (video.srcObject && video.paused === false) {
+    isRunning = true;
+    lastFrameTime = 0;
+    animFrameId = requestAnimationFrame(loop);
+  }
+});
+
+/* ── Init ── */
+setColor('red');
+startCamera();
+
+} catch(e) {
+  console.error('隔空画笔初始化失败:', e);
+  var overlay = document.getElementById('loadingOverlay');
+  if (overlay) {
+    overlay.classList.remove('hidden');
+    var sp = document.getElementById('spinner');
+    if (sp) sp.style.display = 'none';
+    var txt = document.getElementById('loadingText');
+    if (txt) {
+      txt.className = 'error-text';
+      txt.textContent = '程序初始化异常: ' + e.message;
+    }
+  }
+}
+})();
+</script>
+</body>
+</html>
