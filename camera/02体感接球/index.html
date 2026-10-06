@@ -186,7 +186,7 @@ async function loadModel(){
   await tf.ready();
   const dp=poseDetection;
   detector=await dp.createDetector(dp.SupportedModels.MoveNet,{
-    modelType:dp.MoveNetModelType.SINGLEPOSE_LIGHTNING
+    modelType:dp.movenet.modelType.SINGLEPOSE_LIGHTNING
   });
   modelReady=true;
 }
