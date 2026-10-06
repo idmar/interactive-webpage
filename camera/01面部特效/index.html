@@ -313,7 +313,9 @@
       stream.getTracks().forEach(function(t){ try{ t.stop(); }catch(e){} });
       stream = null;
     }
+    video.srcObject = null;
     if(rafId){ cancelAnimationFrame(rafId); rafId = null; }
+    latestKp = null;
     liveBadge.classList.remove("show");
     btnShot.disabled = true;
   }
@@ -351,10 +353,21 @@
     video.srcObject = stream;
 
     await new Promise(function(resolve, reject){
-      video.onloadedmetadata = function(){
-        video.play().then(resolve, resolve);
+      function cleanup(){
+        video.removeEventListener("loadedmetadata", onLoaded);
+        video.removeEventListener("error", onError);
+      }
+      function onLoaded(){
+        cleanup();
+        video.play().then(resolve, reject);
       };
-      video.onerror = function(){ reject({name:"VideoError"}); };
+      function onError(){
+        cleanup();
+        reject({name:"VideoError"});
+      }
+      video.addEventListener("loadedmetadata", onLoaded, {once:true});
+      video.addEventListener("error", onError, {once:true});
+      if(video.readyState >= HTMLMediaElement.HAVE_METADATA){ onLoaded(); }
     });
 
     resizeCanvas();
@@ -525,11 +538,15 @@
         drawEffects(ctx, kp);
         facePresent = true;
       }else{
+        latestKp = null;
         facePresent = false;
       }
     }catch(err){
-      // 单次检测失败不中断循环
+      console.error("面部特效人脸识别失败：", err);
       facePresent = false;
+      stopStream();
+      hideLoading();
+      showError("人脸识别失败", "AI 模型处理摄像头画面时发生错误。请检查网络和浏览器控制台，然后点击「重新尝试」。");
     }finally{
       detecting = false;
     }
@@ -594,6 +611,7 @@
       updateToggleUI();
       detectLoop();
     }catch(err){
+      console.error("面部特效启动失败：", err);
       stopStream();
       var name = err && err.name;
       if(name === "NotAllowedError" || name === "SecurityError"){
@@ -609,7 +627,7 @@
       }else{
         showError("启动失败", "发生了未知错误，请重试或更换浏览器。");
       }
-      setLoading("启动未完成", "根据下方提示处理后，点击「重新尝试」。");
+      hideLoading();
     }
   }
 
