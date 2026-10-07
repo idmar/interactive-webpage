@@ -12,26 +12,63 @@
 :root{
   --bg:#0e0e12;--card:#1a1a24;--card2:#22223a;--accent:#6c63ff;
   --accent2:#ff6b9d;--text:#e8e8f0;--text2:#9898b0;--radius:16px;
-  --green:#4ade80;--red:#f87171;--amber:#fbbf24;
+  --green:#4ade80;--red:#f87171;--amber:#fbbf24;--cam-width:min(30vw,360px);
 }
 html{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Noto Sans SC",sans-serif;
   background:var(--bg);color:var(--text);overflow-x:hidden;scroll-behavior:smooth}
-body{min-height:100dvh;display:flex;flex-direction:column;align-items:center;padding:12px 16px 40px}
+body{position:relative;isolation:isolate;min-height:100dvh;display:flex;flex-direction:column;align-items:center;
+  padding:12px 16px 40px;background:transparent}
+body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
+  background-color:var(--bg);
+  background-image:linear-gradient(rgba(14,14,18,.62),rgba(14,14,18,.72)),var(--page-image,none);
+  background-position:center;background-size:cover;background-repeat:no-repeat}
+.page-content{position:fixed;left:18px;right:18px;bottom:18px;z-index:10;width:auto;max-width:none;margin:0;
+  padding:12px 16px;display:grid;grid-template-columns:minmax(210px,.7fr) minmax(0,1.8fr);
+  align-items:center;gap:18px;border:1px solid rgba(255,255,255,.12);border-radius:16px;
+  background:rgba(14,14,22,.78);backdrop-filter:blur(14px);box-shadow:0 12px 36px rgba(0,0,0,.28)}
+.page-intro{min-width:0}
 h1{font-size:clamp(1.6rem,4vw,2.4rem);font-weight:800;letter-spacing:-.02em;
   background:linear-gradient(135deg,var(--accent),var(--accent2));-webkit-background-clip:text;
-  -webkit-text-fill-color:transparent;background-clip:text;text-align:center;margin-top:8px}
-.subtitle{text-align:center;color:var(--text2);font-size:.85rem;margin-top:4px;letter-spacing:.04em}
+  -webkit-text-fill-color:transparent;background-clip:text;text-align:left;margin-top:0}
+.subtitle{color:var(--text2);font-size:.85rem;margin-top:4px;letter-spacing:.04em}
 .hint{background:var(--card);border:1px solid rgba(255,255,255,.06);border-radius:var(--radius);
-  padding:12px 18px;margin:14px 0 10px;font-size:.82rem;color:var(--text2);line-height:1.6;
-  max-width:640px;width:100%;text-align:center}
+  padding:8px 10px;margin:8px 0 0;font-size:.76rem;color:var(--text2);line-height:1.5;
+  width:100%;text-align:left}
 .hint em{color:var(--accent);font-style:normal;font-weight:600}
 
-/* video / canvas area */
-.cam-wrap{position:relative;width:100%;max-width:640px;aspect-ratio:4/3;border-radius:var(--radius);
-  overflow:hidden;background:#000;margin-bottom:14px}
+/* camera and display controls */
+.cam-wrap{position:fixed;top:18px;right:18px;z-index:20;width:var(--cam-width);min-width:240px;
+  aspect-ratio:4/3;border:1px solid rgba(255,255,255,.18);border-radius:var(--radius);
+  overflow:hidden;background:#000;box-shadow:0 12px 36px rgba(0,0,0,.38);
+  transition:width .25s ease,top .25s ease,right .25s ease,border-radius .25s ease}
 .cam-wrap video,.cam-wrap canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
 .cam-wrap video{transform:scaleX(-1)}
 .cam-wrap canvas{transform:scaleX(-1);pointer-events:none}
+.camera-toggle{display:none;position:absolute;top:8px;left:8px;z-index:8;padding:7px 10px;
+  border:1px solid rgba(255,255,255,.2);border-radius:999px;background:rgba(0,0,0,.68);
+  color:#fff;font-family:inherit;font-size:.72rem;font-weight:600;cursor:pointer;backdrop-filter:blur(8px)}
+.camera-toggle:hover{background:rgba(0,0,0,.88)}
+.camera-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+body.elements-hidden .camera-toggle,.cam-wrap.camera-hidden .camera-toggle{display:block}
+.cam-wrap.camera-hidden{width:0;min-width:0;aspect-ratio:auto;overflow:visible;border:0;box-shadow:none}
+.cam-wrap.camera-hidden video,.cam-wrap.camera-hidden canvas,
+.cam-wrap.camera-hidden .gesture-hud,.cam-wrap.camera-hidden .toast,
+.cam-wrap.camera-hidden .loading-overlay,.cam-wrap.camera-hidden .error-box{display:none}
+.cam-wrap.camera-hidden .camera-toggle{top:0;left:auto;right:0;white-space:nowrap}
+.layout-controls{position:fixed;left:18px;top:18px;z-index:30}
+.layout-toggle{display:flex;align-items:center;gap:8px;padding:11px 15px;border:1px solid rgba(255,255,255,.18);
+  border-radius:999px;background:rgba(20,20,30,.88);color:var(--text);font-family:inherit;font-size:.82rem;font-weight:600;
+  cursor:pointer;box-shadow:0 8px 24px rgba(0,0,0,.3);backdrop-filter:blur(10px)}
+.layout-toggle:hover{background:rgba(44,42,68,.95)}
+.layout-toggle:focus-visible,.g-item:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+body.elements-hidden .page-content{display:none}
+body.elements-hidden .cam-wrap{width:min(19vw,220px);min-width:150px;top:12px;right:12px;border-radius:12px}
+body.elements-hidden .cam-wrap.camera-hidden{width:0;min-width:0}
+body.elements-hidden{min-height:100dvh;padding:0}
+body.elements-hidden .layout-controls{left:12px;top:12px}
+.layout-toggle .toggle-show{display:none}
+body.elements-hidden .layout-toggle .toggle-hide{display:none}
+body.elements-hidden .layout-toggle .toggle-show{display:inline}
 
 /* gesture HUD */
 .gesture-hud{position:absolute;top:12px;right:12px;background:rgba(0,0,0,.55);backdrop-filter:blur(8px);
@@ -66,9 +103,9 @@ h1{font-size:clamp(1.6rem,4vw,2.4rem);font-weight:800;letter-spacing:-.02em;
 .retry-btn:active{transform:scale(.96)}
 
 /* gallery */
-.gallery{width:100%;max-width:640px}
-.gallery-label{font-size:.78rem;color:var(--text2);margin-bottom:8px;text-align:center}
-.gallery-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.gallery{width:100%;min-width:0}
+.gallery-label{font-size:.78rem;color:var(--text2);margin-bottom:6px;text-align:left}
+.gallery-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px}
 .gallery-grid .g-item{position:relative;aspect-ratio:4/3;border-radius:10px;overflow:hidden;
   border:2px solid transparent;transition:border-color .25s,box-shadow .25s;cursor:pointer}
 .g-item img{width:100%;height:100%;object-fit:cover;display:block}
@@ -87,31 +124,49 @@ footer{margin-top:auto;padding-top:24px;font-size:.72rem;color:var(--text2);opac
 /* print */
 @media print{
   body{background:#fff;color:#000}
-  .cam-wrap,.loading-overlay,.gesture-hud,.toast,.error-box{display:none!important}
+  .cam-wrap,.loading-overlay,.gesture-hud,.toast,.error-box,.layout-controls{display:none!important}
   .gallery-grid{gap:4px}
   h1{background:none;-webkit-text-fill-color:#000;color:#000}
 }
 /* mobile tweaks */
-@media(max-width:480px){
+@media(max-width:640px){
+  :root{--cam-width:35vw}
   body{padding:8px 10px 30px}
-  .gallery-grid{gap:6px}
-  .hint{font-size:.76rem;padding:10px 12px}
+  .page-content{left:10px;right:10px;bottom:10px;padding:8px;display:block}
+  .page-intro,.page-content footer{display:none}
+  .cam-wrap{top:10px;right:10px;min-width:132px;border-radius:12px}
+  body.elements-hidden .cam-wrap{width:24vw;min-width:104px;top:8px;right:8px}
+  .layout-controls{left:10px;top:10px}
+  .layout-toggle{padding:10px 13px}
+  .gallery-grid{gap:5px}
+  .gallery-label{margin-bottom:4px;font-size:.7rem}
+  .gallery-grid .g-item{border-radius:7px}
 }
 </style>
 </head>
 <body>
 
+<div class="page-content" id="pageContent">
+<div class="page-intro">
 <h1>手势控制</h1>
 <p class="subtitle">MediaPipe Hands · 隔空互动</p>
 <p class="hint">
   把手放在镜头前试试手势：<em>OK 确认</em>，<em>拳头暂停</em>，<em>左右挥手切换图片</em>。<br/>手和背景要有明显色差。
 </p>
+</div>
 
-<div class="cam-wrap" id="camWrap">
+<section class="gallery">
+  <p class="gallery-label">画廊 · 挥手切换</p>
+  <div class="gallery-grid" id="galleryGrid"></div>
+</section>
+</div>
+
+<div class="cam-wrap" id="camWrap" aria-label="实时相机视图">
   <video id="video" playsinline muted></video>
   <canvas id="overlay"></canvas>
   <div class="gesture-hud" id="gestureHud"><span class="dot dot-idle" id="gestureDot"></span><span id="gestureLabel">Idle</span></div>
   <div class="toast" id="toast"></div>
+  <button class="camera-toggle" id="cameraToggle" type="button" aria-pressed="false">隐藏相机</button>
   <div class="loading-overlay" id="loadingOverlay">
     <div class="spinner" id="spinner"></div>
     <p class="load-text" id="loadText">请求摄像头…</p>
@@ -122,12 +177,12 @@ footer{margin-top:auto;padding-top:24px;font-size:.72rem;color:var(--text2);opac
   </div>
 </div>
 
-<section class="gallery">
-  <p class="gallery-label">画廊 · 挥手切换</p>
-  <div class="gallery-grid" id="galleryGrid"></div>
-</section>
-
-<footer>纯前端本地运行，不上云</footer>
+<div class="layout-controls">
+  <button class="layout-toggle" id="layoutToggle" type="button" aria-expanded="true" aria-controls="pageContent">
+    <span class="toggle-hide">隐藏页面内容</span>
+    <span class="toggle-show">显示页面内容</span>
+  </button>
+</div>
 
 <script>
 (function(){
@@ -148,6 +203,9 @@ const gestureLabel=document.getElementById('gestureLabel');
 const gestureDot=document.getElementById('gestureDot');
 const toast=document.getElementById('toast');
 const galleryGrid=document.getElementById('galleryGrid');
+const layoutToggle=document.getElementById('layoutToggle');
+const camWrap=document.getElementById('camWrap');
+const cameraToggle=document.getElementById('cameraToggle');
 
 /* ── constants ── */
 const WAVE_THRESHOLD=120;   // px displacement for wave
@@ -167,6 +225,23 @@ let pauseTimer=null;
 let toastTimer=null;
 let prevGesture='Idle';
 const reducedMotion=window.matchMedia('(prefers-reduced-motion:reduce)').matches;
+let cameraHidden=false;
+
+layoutToggle.addEventListener('click',function(){
+  const hidden=document.body.classList.toggle('elements-hidden');
+  layoutToggle.setAttribute('aria-expanded',String(!hidden));
+});
+cameraToggle.addEventListener('click',function(){
+  cameraHidden=!cameraHidden;
+  camWrap.classList.toggle('camera-hidden',cameraHidden);
+  cameraToggle.textContent=cameraHidden?'显示相机':'隐藏相机';
+  cameraToggle.setAttribute('aria-pressed',String(cameraHidden));
+  if(cameraHidden){
+    ctx.clearRect(0,0,overlay.width,overlay.height);
+    waveAnchorX=null;
+    updateHUD('Idle');
+  }
+});
 
 /* ── finger name map ── */
 const FINGER_NAMES=['手腕','拇指','食指','中指','无名指','小指'];
@@ -213,11 +288,15 @@ IMG_URLS.forEach(function(url,i){
   div.addEventListener('click',function(){selectImage(i)});
   galleryGrid.appendChild(div);
 });
+updatePageBackground();
 
 function selectImage(i){
   currentImg=i;
   confirmedImg=-1;
   updateGalleryUI();
+}
+function updatePageBackground(){
+  document.body.style.setProperty('--page-image','url("'+IMG_URLS[currentImg]+'")');
 }
 function updateGalleryUI(){
   const items=galleryGrid.querySelectorAll('.g-item');
@@ -226,6 +305,7 @@ function updateGalleryUI(){
     if(i===currentImg) el.classList.add('active');
     if(i===confirmedImg) el.classList.add('confirmed');
   });
+  updatePageBackground();
 }
 
 /* ── toast ── */
@@ -393,6 +473,7 @@ function hideError(){
 }
 
 function onResults(results){
+  if(cameraHidden){return;}
   var W=overlay.width=video.videoWidth||640;
   var H=overlay.height=video.videoHeight||480;
   ctx.clearRect(0,0,W,H);
@@ -436,6 +517,7 @@ function startCamera(){
     setLoad('请求摄像头…');
     camera=new Camera(video,{
       onFrame:function(){
+        if(cameraHidden){return Promise.resolve();}
         return hands.send({image:video});
       },
       width:640,

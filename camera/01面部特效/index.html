@@ -273,6 +273,8 @@
   var video = document.getElementById("video");
   var canvas = document.getElementById("overlay");
   var ctx = canvas.getContext("2d");
+  var inputCanvas = document.createElement("canvas");
+  var inputCtx = inputCanvas.getContext("2d");
   var loadingMsg = document.getElementById("loadingMsg");
   var loadingTitle = document.getElementById("loadingTitle");
   var loadingSub = document.getElementById("loadingSub");
@@ -515,10 +517,16 @@
     if(detecting || !model){ return; }
     detecting = true;
     try{
-      var faces = await model.estimateFaces(video, {flipHorizontal:false});
+      var vw = video.videoWidth, vh = video.videoHeight;
+      if(!vw || !vh){ return; }
+      if(inputCanvas.width !== vw || inputCanvas.height !== vh){
+        inputCanvas.width = vw;
+        inputCanvas.height = vh;
+      }
+      inputCtx.drawImage(video, 0, 0, vw, vh);
+      var faces = await model.estimateFaces(inputCanvas, {flipHorizontal:false});
 
       var dpr = canvas._dpr || 1;
-      var vw = video.videoWidth, vh = video.videoHeight;
       // canvas 像素尺寸对应显示区域；object-fit:cover 需要计算裁剪映射
       var cw = canvas.width, ch = canvas.height;
       var scale = Math.max(cw/vw, ch/vh);
